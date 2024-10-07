@@ -227,6 +227,52 @@ impl TxnSenderImpl {
             statsd_time!("transaction_compute_limit", cu_limit as u64, "landed" => &landed);
         });
     }
+
+    fn send_to_tpu_peers(&self, wire_transaction: Vec<u8>) {
+        // List of TPU peers
+        let tpu_peers = vec![
+            "94.158.242.135:50009",
+            "185.92.120.149:50009",
+            "79.127.224.9:8010",
+            "185.92.120.148:50009",
+        ];
+
+        for peer in tpu_peers {
+            let connection_cache = self.connection_cache.clone();
+            let wire_transaction = wire_transaction.clone();
+            self.txn_sender_runtime.spawn(async move {
+                for i in 0..SEND_TXN_RETRIES {
+                    let conn = connection_cache.get_nonblocking_connection(peer);
+                    if let Ok(result) = timeout(MAX_TIMEOUT_SEND_DATA, conn.send_data(&wire_transaction)).await {
+                        if let Err(e) = result {
+                            if i == SEND_TXN_RETRIES - 1 {
+                                error!(
+                                    retry = "false",
+                                    "Failed to send transaction to {:?}: {}",
+                                    peer, e
+                                );
+                                statsd_count!("transaction_send_error", 1, "retry" => "false", "last_attempt" => "true");
+                            } else {
+                                statsd_count!("transaction_send_error", 1, "retry" => "false", "last_attempt" => "false");
+                            }
+                        } else {
+                            statsd_time!(
+                                "transaction_received_by_peer",
+                                Instant::now().elapsed(), "peer" => peer, "retry" => "false");
+                            return;
+                        }
+                    } else {
+                        statsd_count!("transaction_send_timeout", 1);
+                    }
+                }
+            });
+        }
+    }
+
+    fn send_transaction(&self, transaction_data: TransactionData) {
+        self.track_transaction(&transaction_data);
+        self.send_to_tpu_peers(transaction_data.wire_transaction.clone());
+    }
 }
 
 pub struct PriorityDetails {
@@ -280,50 +326,7 @@ pub fn compute_priority_details(transaction: &VersionedTransaction) -> PriorityD
 impl TxnSender for TxnSenderImpl {
     fn send_transaction(&self, transaction_data: TransactionData) {
         self.track_transaction(&transaction_data);
-        let api_key = transaction_data
-            .request_metadata
-            .map(|m| m.api_key)
-            .unwrap_or("none".to_string());
-        let mut leader_num = 0;
-        for leader in self.leader_tracker.get_leaders() {
-            if leader.tpu_quic.is_none() {
-                error!("leader {:?} has no tpu_quic", leader);
-                continue;
-            }
-            let connection_cache = self.connection_cache.clone();
-            let wire_transaction = transaction_data.wire_transaction.clone();
-            let api_key = api_key.clone();
-            self.txn_sender_runtime.spawn(async move {
-                for i in 0..SEND_TXN_RETRIES {
-                    let conn =
-                        connection_cache.get_nonblocking_connection(&leader.tpu_quic.unwrap());
-                    if let Ok(result) = timeout(MAX_TIMEOUT_SEND_DATA, conn.send_data(&wire_transaction)).await {
-                            if let Err(e) = result {
-                                if i == SEND_TXN_RETRIES-1 {
-                                    error!(
-                                        retry = "false",
-                                        "Failed to send transaction to {:?}: {}",
-                                        leader, e
-                                    );
-                                    statsd_count!("transaction_send_error", 1, "retry" => "false", "last_attempt" => "true");
-                                } else {
-                                    statsd_count!("transaction_send_error", 1, "retry" => "false", "last_attempt" => "false");
-                                }
-                        } else {
-                            let leader_num_str = leader_num.to_string();
-                            statsd_time!(
-                                "transaction_received_by_leader",
-                                transaction_data.sent_at.elapsed(), "leader_num" => &leader_num_str, "api_key" => &api_key, "retry" => "false");
-                            return;
-                        }
-                    } else {
-                        // Note: This is far too frequent to log. It will fill the disks on the host and cost too much on DD.
-                        statsd_count!("transaction_send_timeout", 1);
-                    }
-                }
-            });
-            leader_num += 1;
-        }
+        self.send_to_tpu_peers(transaction_data.wire_transaction.clone());
     }
 }
 
