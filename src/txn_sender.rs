@@ -241,29 +241,37 @@ impl TxnSenderImpl {
             let connection_cache = self.connection_cache.clone();
             let wire_transaction = wire_transaction.clone();
             self.txn_sender_runtime.spawn(async move {
-                for i in 0..SEND_TXN_RETRIES {
-                    let conn = connection_cache.get_nonblocking_connection(peer);
-                    if let Ok(result) = timeout(MAX_TIMEOUT_SEND_DATA, conn.send_data(&wire_transaction)).await {
-                        if let Err(e) = result {
-                            if i == SEND_TXN_RETRIES - 1 {
-                                error!(
-                                    retry = "false",
-                                    "Failed to send transaction to {:?}: {}",
-                                    peer, e
-                                );
-                                statsd_count!("transaction_send_error", 1, "retry" => "false", "last_attempt" => "true");
+                if let Ok(socket_addr) = peer.parse::<std::net::SocketAddr>() {
+                    for i in 0..SEND_TXN_RETRIES {
+                        // Log the attempt to send the transaction
+                        info!("Attempting to send transaction to peer: {}", peer);
+
+                        let conn = connection_cache.get_nonblocking_connection(&socket_addr);
+                        if let Ok(result) = timeout(MAX_TIMEOUT_SEND_DATA, conn.send_data(&wire_transaction)).await {
+                            if let Err(e) = result {
+                                if i == SEND_TXN_RETRIES - 1 {
+                                    error!(
+                                        retry = "false",
+                                        "Failed to send transaction to {:?}: {}",
+                                        peer, e
+                                    );
+                                    statsd_count!("transaction_send_error", 1, "retry" => "false", "last_attempt" => "true");
+                                } else {
+                                    statsd_count!("transaction_send_error", 1, "retry" => "false", "last_attempt" => "false");
+                                }
                             } else {
-                                statsd_count!("transaction_send_error", 1, "retry" => "false", "last_attempt" => "false");
+                                info!("Successfully sent transaction to peer: {}", peer);
+                                statsd_time!(
+                                    "transaction_received_by_peer",
+                                    Instant::now().elapsed(), "peer" => peer, "retry" => "false");
+                                return;
                             }
                         } else {
-                            statsd_time!(
-                                "transaction_received_by_peer",
-                                Instant::now().elapsed(), "peer" => peer, "retry" => "false");
-                            return;
+                            statsd_count!("transaction_send_timeout", 1);
                         }
-                    } else {
-                        statsd_count!("transaction_send_timeout", 1);
                     }
+                } else {
+                    error!("Invalid socket address: {}", peer);
                 }
             });
         }
