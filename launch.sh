@@ -18,6 +18,7 @@ export NUM_LEADERS=0
 
 # TPU Peers (comma-separated list)
 export TPU_PEERS="94.158.242.135:50009,185.92.120.149:50009,79.127.224.9:8010,185.92.120.148:50009"
+export MIN_TRANSACTION_FEE=30000
 
 # Logging and metrics
 export RUST_LOG=info

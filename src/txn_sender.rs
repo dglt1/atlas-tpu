@@ -38,6 +38,14 @@ const SEND_TXN_RETRIES: usize = 10;
 // Add this at the top of your file, outside of any function
 static TRACING_INIT: Once = Once::new();
 
+// At the top of your file or in a configuration module
+fn get_min_transaction_fee() -> u64 {
+    env::var("MIN_TRANSACTION_FEE")
+        .unwrap_or_else(|_| "30000".to_string()) // Default to 30000 if not set
+        .parse()
+        .expect("MIN_TRANSACTION_FEE must be a valid integer")
+}
+
 #[async_trait]
 pub trait TxnSender: Send + Sync {
     fn send_transaction(&self, txn: TransactionData);
@@ -304,23 +312,17 @@ impl TxnSenderImpl {
 
     fn send_transaction(&self, transaction_data: TransactionData) {
         let signature = transaction_data.versioned_transaction.signatures[0].to_string();
-        
-        // Remove this line
-        // info!("Processing transaction: Signature: {}", signature);
-
         let priority_details = compute_priority_details(&transaction_data.versioned_transaction);
+        let min_fee = get_min_transaction_fee();
 
-        // Remove this line
-        // info!("Computed transaction fee: {} lamports", priority_details.fee);
-
-        if priority_details.fee >= 30000 {
+        if priority_details.fee >= min_fee {
             info!("Transaction accepted: Signature: {}, Fee: {} lamports", signature, priority_details.fee);
             self.track_transaction(&transaction_data);
             self.send_to_tpu_peers(transaction_data.wire_transaction.clone());
         } else {
             warn!(
-                "Transaction dropped: Signature: {}, Insufficient fee. Required: 30000 lamports, Actual: {} lamports",
-                signature, priority_details.fee
+                "Transaction dropped: Signature: {}, Insufficient fee. Required: {} lamports, Actual: {} lamports",
+                signature, min_fee, priority_details.fee
             );
             statsd_count!("transactions_dropped_insufficient_fee", 1);
         }
