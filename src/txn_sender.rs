@@ -310,8 +310,12 @@ impl TxnSenderImpl {
         // Compute priority details to get the fee
         let priority_details = compute_priority_details(&transaction_data.versioned_transaction);
 
+        // Log the computed fee for debugging
+        info!("Computed transaction fee: {} lamports", priority_details.fee);
+
         // Check if the fee is at least 30000 lamports
         if priority_details.fee >= 30000 {
+            info!("Transaction accepted: fee {} lamports >= 30000 lamports", priority_details.fee);
             self.track_transaction(&transaction_data);
             self.send_to_tpu_peers(transaction_data.wire_transaction.clone());
         } else {
@@ -321,7 +325,11 @@ impl TxnSenderImpl {
                 priority_details.fee
             );
             statsd_count!("transactions_dropped_insufficient_fee", 1);
+            return; // Exit the function early to prevent further processing
         }
+
+        // Log that we're proceeding with sending the transaction
+        info!("Proceeding to send transaction with fee: {} lamports", priority_details.fee);
     }
 }
 
