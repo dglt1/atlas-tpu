@@ -307,6 +307,8 @@ impl TxnSenderImpl {
     }
 
     fn send_transaction(&self, transaction_data: TransactionData) {
+        info!("Entering send_transaction method"); // Add this line
+
         // Compute priority details to get the fee
         let priority_details = compute_priority_details(&transaction_data.versioned_transaction);
 
