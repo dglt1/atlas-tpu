@@ -123,7 +123,7 @@ impl GrpcGeyserImpl {
                         }
                     }
                 }
-                sleep(Duration::from_secs(1)).await;
+                sleep(Duration::from_secs(60)).await;
             }
         });
     }

@@ -27,6 +27,7 @@ use crate::{
 use solana_program_runtime::compute_budget::DEFAULT_INSTRUCTION_COMPUTE_UNIT_LIMIT;
 use solana_sdk::borsh0_10::try_from_slice_unchecked;
 use solana_sdk::compute_budget::ComputeBudgetInstruction;
+use std::env;
 
 const RETRY_COUNT_BINS: [i32; 6] = [0, 1, 2, 5, 10, 25];
 const MAX_RETRIES_BINS: [i32; 5] = [0, 1, 5, 10, 30];
@@ -259,12 +260,7 @@ impl TxnSenderImpl {
 
     fn send_to_tpu_peers(&self, wire_transaction: Vec<u8>) {
         // List of TPU peers
-        let tpu_peers = vec![
-            "94.158.242.135:50009",
-            "185.92.120.149:50009",
-            "79.127.224.9:8010",
-            "185.92.120.148:50009",
-        ];
+        let tpu_peers = get_tpu_peers();
 
         for peer in tpu_peers {
             let connection_cache = self.connection_cache.clone();
@@ -292,7 +288,7 @@ impl TxnSenderImpl {
                                 info!("Successfully sent transaction to peer: {}", peer);
                                 statsd_time!(
                                     "transaction_received_by_peer",
-                                    Instant::now().elapsed(), "peer" => peer, "retry" => "false");
+                                    Instant::now().elapsed(), "peer" => &peer, "retry" => "false");
                                 return;
                             }
                         } else {
@@ -403,6 +399,14 @@ fn bin_counter_to_tag(counter: Option<i32>, bins: &Vec<i32>) -> String {
         bin_end = bin.to_string();
     }
     format!("{}_{}", bin_start, bin_end)
+}
+
+fn get_tpu_peers() -> Vec<String> {
+    env::var("TPU_PEERS")
+        .expect("TPU_PEERS environment variable not set")
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .collect()
 }
 
 #[test]
