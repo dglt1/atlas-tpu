@@ -1,0 +1,16 @@
+   #copy to /etc/systemd/system/atlas-tpu.service
+   
+   [Unit]
+   Description=AtlasMod Launch Script
+   After=solana-validator.service
+
+   [Service]
+   User=solana
+   WorkingDirectory=/home/solana/atlas-tpu
+   ExecStart=/home/solana/atlas-tpu/launch.sh
+   Restart=on-failure
+   StandardOutput=append:/home/solana/atlasmod.log
+   StandardError=inherit
+
+   [Install]
+   WantedBy=multi-user.target
