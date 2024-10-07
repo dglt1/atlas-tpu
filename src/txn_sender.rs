@@ -14,6 +14,10 @@ use tokio::{
 };
 use tonic::async_trait;
 use tracing::{error, info, warn};
+use dashmap::DashMap;
+use tracing_subscriber::{EnvFilter, fmt::Subscriber};
+use tracing_subscriber::util::SubscriberInitExt;
+use std::sync::Once;
 
 use crate::{
     leader_tracker::LeaderTracker,
@@ -29,6 +33,9 @@ const MAX_RETRIES_BINS: [i32; 5] = [0, 1, 5, 10, 30];
 const MAX_TIMEOUT_SEND_DATA: Duration = Duration::from_millis(500);
 const MAX_TIMEOUT_SEND_DATA_BATCH: Duration = Duration::from_millis(500);
 const SEND_TXN_RETRIES: usize = 10;
+
+// Add this at the top of your file, outside of any function
+static TRACING_INIT: Once = Once::new();
 
 #[async_trait]
 pub trait TxnSender: Send + Sync {
@@ -55,6 +62,21 @@ impl TxnSenderImpl {
         txn_send_retry_interval_seconds: usize,
         max_retry_queue_size: Option<usize>,
     ) -> Self {
+        // Initialize tracing subscriber only once
+        TRACING_INIT.call_once(|| {
+            let env_filter = EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info"));
+
+            let subscriber = Subscriber::builder()
+                .with_env_filter(env_filter)
+                .finish();
+
+            // Use set_global_default instead of try_init
+            if let Err(e) = tracing::subscriber::set_global_default(subscriber) {
+                eprintln!("Warning: Failed to set global default subscriber: {}", e);
+            }
+        });
+
         let txn_sender_runtime = Builder::new_multi_thread()
             .worker_threads(txn_sender_threads)
             .enable_all()
@@ -86,6 +108,13 @@ impl TxnSenderImpl {
                 let transaction_map = transaction_store.get_transactions();
                 let queue_length = transaction_map.len();
                 statsd_gauge!("transaction_retry_queue_length", queue_length as u64);
+
+                // Log each transaction's data using tracing's info macro
+                for entry in transaction_map.iter() {
+                    let signature = entry.key();
+                    let transaction_data = entry.value();
+                    info!("Transaction Signature: {}, Data: {:?}", signature, transaction_data);
+                }
 
                 // Shed transactions by retry_count, if necessary.
                 if let Some(max_size) = max_retry_queue_size {
@@ -278,8 +307,21 @@ impl TxnSenderImpl {
     }
 
     fn send_transaction(&self, transaction_data: TransactionData) {
-        self.track_transaction(&transaction_data);
-        self.send_to_tpu_peers(transaction_data.wire_transaction.clone());
+        // Compute priority details to get the fee
+        let priority_details = compute_priority_details(&transaction_data.versioned_transaction);
+
+        // Check if the fee is at least 30000 lamports
+        if priority_details.fee >= 30000 {
+            self.track_transaction(&transaction_data);
+            self.send_to_tpu_peers(transaction_data.wire_transaction.clone());
+        } else {
+            // Log that the transaction was dropped due to insufficient fee
+            warn!(
+                "Transaction dropped: insufficient fee. Required: 30000 lamports, Actual: {} lamports",
+                priority_details.fee
+            );
+            statsd_count!("transactions_dropped_insufficient_fee", 1);
+        }
     }
 }
 
@@ -333,8 +375,7 @@ pub fn compute_priority_details(transaction: &VersionedTransaction) -> PriorityD
 #[async_trait]
 impl TxnSender for TxnSenderImpl {
     fn send_transaction(&self, transaction_data: TransactionData) {
-        self.track_transaction(&transaction_data);
-        self.send_to_tpu_peers(transaction_data.wire_transaction.clone());
+        self.send_transaction(transaction_data);
     }
 }
 
