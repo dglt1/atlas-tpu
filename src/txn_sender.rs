@@ -307,33 +307,27 @@ impl TxnSenderImpl {
     }
 
     fn send_transaction(&self, transaction_data: TransactionData) {
-        // Add this line at the beginning of the method to log the signature
         let signature = transaction_data.versioned_transaction.signatures[0].to_string();
-        info!("Processing transaction: Signature: {}", signature);
+        
+        // Remove this line
+        // info!("Processing transaction: Signature: {}", signature);
 
-        // Compute priority details to get the fee
         let priority_details = compute_priority_details(&transaction_data.versioned_transaction);
 
-        // Log the computed fee for debugging
-        info!("Computed transaction fee: {} lamports", priority_details.fee);
+        // Remove this line
+        // info!("Computed transaction fee: {} lamports", priority_details.fee);
 
-        // Check if the fee is at least 30000 lamports
         if priority_details.fee >= 30000 {
             info!("Transaction accepted: Signature: {}, Fee: {} lamports", signature, priority_details.fee);
             self.track_transaction(&transaction_data);
             self.send_to_tpu_peers(transaction_data.wire_transaction.clone());
         } else {
-            // Log that the transaction was dropped due to insufficient fee
             warn!(
                 "Transaction dropped: Signature: {}, Insufficient fee. Required: 30000 lamports, Actual: {} lamports",
                 signature, priority_details.fee
             );
             statsd_count!("transactions_dropped_insufficient_fee", 1);
-            return; // Exit the function early to prevent further processing
         }
-
-        // Log that we're proceeding with sending the transaction
-        info!("Proceeding to send transaction with fee: {} lamports", priority_details.fee);
     }
 }
 
