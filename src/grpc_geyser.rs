@@ -231,7 +231,7 @@ fn get_block_subscribe_request() -> SubscribeRequest {
             generate_random_string(20),
             SubscribeRequestFilterBlocks {
                 account_include: vec![],
-                include_transactions: Some(false),
+                include_transactions: Some(true),
                 include_accounts: Some(false),
                 include_entries: Some(false),
             },

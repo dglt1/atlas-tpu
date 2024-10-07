@@ -47,7 +47,7 @@ struct AtlasTxnSenderEnv {
 }
 
 // Defualt on RPC is 4
-pub const DEFAULT_TPU_CONNECTION_POOL_SIZE: usize = 4;
+pub const DEFAULT_TPU_CONNECTION_POOL_SIZE: usize = 1;
 
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
