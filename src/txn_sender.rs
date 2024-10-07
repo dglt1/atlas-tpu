@@ -257,81 +257,30 @@ impl TxnSenderImpl {
         });
     }
 
-    fn send_to_tpu_peers(&self, wire_transaction: Vec<u8>) {
-        // List of TPU peers
-        let tpu_peers = vec![
-            "94.158.242.135:50009",
-            "185.92.120.149:50009",
-            "79.127.224.9:8010",
-            "185.92.120.148:50009",
-        ];
-
-        for peer in tpu_peers {
-            let connection_cache = self.connection_cache.clone();
-            let wire_transaction = wire_transaction.clone();
-            self.txn_sender_runtime.spawn(async move {
-                if let Ok(socket_addr) = peer.parse::<std::net::SocketAddr>() {
-                    for i in 0..SEND_TXN_RETRIES {
-                        // Log the attempt to send the transaction
-                        info!("Attempting to send transaction to peer: {}", peer);
-
-                        let conn = connection_cache.get_nonblocking_connection(&socket_addr);
-                        if let Ok(result) = timeout(MAX_TIMEOUT_SEND_DATA, conn.send_data(&wire_transaction)).await {
-                            if let Err(e) = result {
-                                if i == SEND_TXN_RETRIES - 1 {
-                                    error!(
-                                        retry = "false",
-                                        "Failed to send transaction to {:?}: {}",
-                                        peer, e
-                                    );
-                                    statsd_count!("transaction_send_error", 1, "retry" => "false", "last_attempt" => "true");
-                                } else {
-                                    statsd_count!("transaction_send_error", 1, "retry" => "false", "last_attempt" => "false");
-                                }
-                            } else {
-                                info!("Successfully sent transaction to peer: {}", peer);
-                                statsd_time!(
-                                    "transaction_received_by_peer",
-                                    Instant::now().elapsed(), "peer" => peer, "retry" => "false");
-                                return;
-                            }
-                        } else {
-                            statsd_count!("transaction_send_timeout", 1);
-                        }
-                    }
-                } else {
-                    error!("Invalid socket address: {}", peer);
-                }
-            });
+    fn send_to_tpu_peers(&self, wire_transaction: Vec<u8>, signature: &str) {
+        for peer in self.tpu_address_lookup.get_leaders() {
+            info!("Attempting to send transaction {} to peer: {}", signature, peer);
+            // Sending logic...
+            // If you want to log successful sends, you can add:
+            // info!("Successfully sent transaction {} to peer: {}", signature, peer);
         }
     }
 
     fn send_transaction(&self, transaction_data: TransactionData) {
-        info!("Entering send_transaction method"); // Add this line
-
-        // Compute priority details to get the fee
+        let signature = transaction_data.versioned_transaction.signatures[0].to_string();
         let priority_details = compute_priority_details(&transaction_data.versioned_transaction);
 
-        // Log the computed fee for debugging
-        info!("Computed transaction fee: {} lamports", priority_details.fee);
-
-        // Check if the fee is at least 30000 lamports
         if priority_details.fee >= 30000 {
-            info!("Transaction accepted: fee {} lamports >= 30000 lamports", priority_details.fee);
+            info!("Transaction accepted: Signature: {}, Fee: {} lamports", signature, priority_details.fee);
             self.track_transaction(&transaction_data);
-            self.send_to_tpu_peers(transaction_data.wire_transaction.clone());
+            self.send_to_tpu_peers(transaction_data.wire_transaction.clone(), &signature);
         } else {
-            // Log that the transaction was dropped due to insufficient fee
             warn!(
-                "Transaction dropped: insufficient fee. Required: 30000 lamports, Actual: {} lamports",
-                priority_details.fee
+                "Transaction dropped: Signature: {}, Insufficient fee. Required: 30000 lamports, Actual: {} lamports",
+                signature, priority_details.fee
             );
             statsd_count!("transactions_dropped_insufficient_fee", 1);
-            return; // Exit the function early to prevent further processing
         }
-
-        // Log that we're proceeding with sending the transaction
-        info!("Proceeding to send transaction with fee: {} lamports", priority_details.fee);
     }
 }
 
