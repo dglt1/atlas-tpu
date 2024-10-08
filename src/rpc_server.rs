@@ -2,7 +2,7 @@ use std::{
     fmt::Debug,
     str::FromStr,
     sync::Arc,
-    time::{Duration, Instant, SystemTime},
+    time::Instant,
 };
 
 use cadence_macros::{statsd_count, statsd_time};

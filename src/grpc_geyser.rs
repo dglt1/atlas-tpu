@@ -95,7 +95,9 @@ impl GrpcGeyserImpl {
                                 let block_time = block.block_time.unwrap().timestamp;
                                 for transaction in block.transactions {
                                     let signature =
-                                        Signature::from(&transaction.signature).to_string();
+                                        Signature::try_from(transaction.signature.as_slice())
+                                            .map(|sig| sig.to_string())
+                                            .unwrap_or_else(|_| "Invalid signature".to_string());
                                     signature_cache.insert(signature, (block_time, Instant::now()));
                                 }
                             }

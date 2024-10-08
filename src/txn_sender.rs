@@ -302,7 +302,7 @@ impl TxnSenderImpl {
 
             // Collect metrics
             // We separate the retry metrics to reduce the cardinality with API key and price.
-            let landed = if let Some(confirmed_at) = confirmed_at {
+            let landed = if let Some(_confirmed_at) = confirmed_at {
                 statsd_count!("transactions_landed", 1, "priority_fees_enabled" => &priority_fees_enabled, "retries" => &retries_tag, "max_retries_tag" => &max_retries_tag);
                 statsd_count!("transactions_landed_by_key", 1, "api_key" => &api_key);
                 statsd_time!("transaction_land_time", sent_at.elapsed(), "api_key" => &api_key, "priority_fees_enabled" => &priority_fees_enabled);
@@ -409,8 +409,9 @@ impl TxnSenderImpl {
         }
 
         let mut validator_info = self.validator_info.lock().unwrap();
+        let updated_info_len = updated_info.len();
         *validator_info = updated_info;
-        info!("Validator info update complete. Updated {} validators.", updated_info.len());
+        info!("Validator info update complete. Updated {} validators.", updated_info_len);
 
         if updated_info.len() < validator_pubkeys.len() {
             warn!("Some validators were not found in the cluster nodes. Expected {}, found {}.", 
@@ -469,7 +470,7 @@ pub struct PriorityDetails {
 pub fn compute_priority_details(transaction: &VersionedTransaction) -> PriorityDetails {
     let mut cu_limit = DEFAULT_INSTRUCTION_COMPUTE_UNIT_LIMIT;
     let mut compute_budget = ComputeBudget::new(DEFAULT_INSTRUCTION_COMPUTE_UNIT_LIMIT as u64);
-    if let Err(e) = transaction.sanitize() {
+    if let Err(_e) = transaction.sanitize() {
         return PriorityDetails {
             fee: 0,
             priority: 0,
@@ -499,7 +500,7 @@ pub fn compute_priority_details(transaction: &VersionedTransaction) -> PriorityD
             priority: compute_budget.get_priority(),
             cu_limit,
         },
-        Err(e) => PriorityDetails {
+        Err(_e) => PriorityDetails {
             fee: 0,
             priority: 0,
             cu_limit,
