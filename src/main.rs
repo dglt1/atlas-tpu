@@ -25,7 +25,7 @@ use solana_sdk::signature::{read_keypair_file, Keypair};
 use tracing::{error, info};
 use transaction_store::TransactionStoreImpl;
 use txn_sender::TxnSenderImpl;
-use crate::rpc_server::AtlasTxnSenderImpl;
+use crate::rpc_server::{AtlasTxnSenderImpl, AtlasTxnSenderServer};
 
 #[derive(Debug, Deserialize)]
 struct AtlasTxnSenderEnv {
