@@ -23,6 +23,7 @@ use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use tokio::time;
+use std::net::SocketAddr;
 
 use crate::{
     leader_tracker::LeaderTracker,
@@ -62,7 +63,7 @@ fn get_txn_send_retry_interval() -> Duration {
 
 struct ValidatorInfo {
     pubkey: Pubkey,
-    tpu_address: String,
+    tpu_address: SocketAddr,
     last_updated: Instant,
 }
 
@@ -397,13 +398,16 @@ impl TxnSenderImpl {
         for node in cluster_nodes {
             if let Ok(pubkey) = Pubkey::from_str(&node.pubkey) {
                 if validator_pubkeys.contains(&pubkey) {
-                    let tpu_address = node.tpu.clone().unwrap_or_default();
-                    updated_info.push(ValidatorInfo {
-                        pubkey,
-                        tpu_address: tpu_address.clone(),
-                        last_updated: Instant::now(),
-                    });
-                    info!("Updated info for validator {}: TPU address {}", pubkey, tpu_address);
+                    if let Some(tpu_address) = node.tpu {
+                        if let Ok(socket_addr) = tpu_address.parse() {
+                            updated_info.push(ValidatorInfo {
+                                pubkey,
+                                tpu_address: socket_addr,
+                                last_updated: Instant::now(),
+                            });
+                            info!("Updated info for validator {}: TPU address {}", pubkey, socket_addr);
+                        }
+                    }
                 }
             }
         }
@@ -437,11 +441,16 @@ impl TxnSenderImpl {
         for node in cluster_nodes {
             if let Ok(pubkey) = Pubkey::from_str(&node.pubkey) {
                 if validator_pubkeys.contains(&pubkey) {
-                    updated_info.push(ValidatorInfo {
-                        pubkey,
-                        tpu_address: node.tpu.unwrap_or_default(),
-                        last_updated: Instant::now(),
-                    });
+                    if let Some(tpu_address) = node.tpu {
+                        if let Ok(socket_addr) = tpu_address.parse() {
+                            updated_info.push(ValidatorInfo {
+                                pubkey,
+                                tpu_address: socket_addr,
+                                last_updated: Instant::now(),
+                            });
+                            info!("Updated info for validator {}: TPU address {}", pubkey, socket_addr);
+                        }
+                    }
                 }
             }
         }
@@ -453,7 +462,7 @@ impl TxnSenderImpl {
 
     fn get_tpu_addresses(&self) -> Vec<String> {
         let validator_info = self.validator_info.lock().unwrap();
-        validator_info.iter().map(|info| info.tpu_address.clone()).collect()
+        validator_info.iter().map(|info| info.tpu_address.to_string()).collect()
     }
 }
 
