@@ -159,7 +159,7 @@ impl TxnSenderImpl {
         let connection_cache = self.connection_cache.clone();
         let txn_sender_runtime = self.txn_sender_runtime.clone();
         let max_retry_queue_size = self.max_retry_queue_size;
-        let self_clone = self.clone();  // Clone self to move into the async block
+        let self_clone = self.clone();
 
         tokio::spawn(async move {
             loop {
@@ -209,16 +209,16 @@ impl TxnSenderImpl {
                     }
                 }
 
-                // Move get_tpu_addresses() call inside the loop
-                let get_tpu_addresses = self_clone.get_tpu_addresses();
-
                 for wire_transaction in wire_transactions.iter() {
-                    for peer in &get_tpu_addresses {
-                        if let Ok(socket_addr) = peer.parse::<std::net::SocketAddr>() {
-                            let connection_cache = connection_cache.clone();
-                            let sent_at = Instant::now();
-                            let wire_transaction = wire_transaction.clone();
-                            txn_sender_runtime.spawn(async move {
+                    let self_clone = self_clone.clone();
+                    let connection_cache = connection_cache.clone();
+                    let wire_transaction = wire_transaction.clone();
+                    
+                    txn_sender_runtime.spawn(async move {
+                        let get_tpu_addresses = self_clone.get_tpu_addresses();
+                        for peer in get_tpu_addresses {
+                            if let Ok(socket_addr) = peer.parse::<std::net::SocketAddr>() {
+                                let sent_at = Instant::now();
                                 // retry unless its a timeout
                                 for i in 0..SEND_TXN_RETRIES {
                                     let conn = connection_cache
@@ -240,25 +240,24 @@ impl TxnSenderImpl {
                                             statsd_time!(
                                                 "transaction_received_by_leader",
                                                 sent_at.elapsed(), "leader_num" => &leader_num_str, "api_key" => "not_applicable", "retry" => "true");
-                                            return;
+                                            break;
                                         }
                                     } else {
-                                        // Note: This is far too frequent to log. It will fill the disks on the host and cost too much on DD.
                                         statsd_count!("transaction_send_timeout", 1);
                                     }
                                 }
-                            });
-                        } else {
-                            error!("Invalid socket address: {}", peer);
+                            } else {
+                                error!("Invalid socket address: {}", peer);
+                            }
                         }
-                    }
+                    });
                 }
                 // remove transactions that reached max retries
                 for signature in transactions_reached_max_retries {
                     let _ = transaction_store.remove_transaction(signature);
                     statsd_count!("transactions_reached_max_retries", 1);
                 }
-                sleep(get_txn_send_retry_interval()).await;
+                sleep(Duration::from_secs(txn_send_retry_interval_seconds)).await;
             }
         });
     }
