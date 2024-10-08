@@ -65,7 +65,7 @@ impl GrpcGeyserImpl {
                 let mut grpc_tx;
                 let mut grpc_rx;
                 {
-                    let mut grpc_client = GeyserGrpcClient::connect::<String, String>(
+                    let grpc_client = GeyserGrpcClient::connect::<String, String>(
                         endpoint.clone(),
                         auth_header.clone(),
                         None,
@@ -95,7 +95,7 @@ impl GrpcGeyserImpl {
                                 let block_time = block.block_time.unwrap().timestamp;
                                 for transaction in block.transactions {
                                     let signature =
-                                        Signature::new(&transaction.signature).to_string();
+                                        Signature::from(&transaction.signature).to_string();
                                     signature_cache.insert(signature, (block_time, Instant::now()));
                                 }
                             }
@@ -138,7 +138,7 @@ impl GrpcGeyserImpl {
                 let mut grpc_tx;
                 let mut grpc_rx;
                 {
-                    let mut grpc_client = GeyserGrpcClient::connect::<String, String>(
+                    let grpc_client = GeyserGrpcClient::connect::<String, String>(
                         endpoint.clone(),
                         auth_header.clone(),
                         None,
