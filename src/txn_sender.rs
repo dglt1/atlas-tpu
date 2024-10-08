@@ -142,7 +142,7 @@ impl TxnSenderImpl {
         // Start a background task to update validator info periodically
         let validator_pubkeys = validator_pubkeys.clone();
         tokio::spawn(async move {
-            let mut interval = time::interval(Duration::from_secs(600)); // 10 minutes
+            let mut interval = time::interval(Duration::from_secs(60)); // 10 minutes
 
             loop {
                 // Wait for the next interval tick
