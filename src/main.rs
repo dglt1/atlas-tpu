@@ -107,7 +107,7 @@ async fn main() -> anyhow::Result<()> {
         env.grpc_url.clone().unwrap(),
         env.x_token.clone(),
     ));
-    let txn_send_retry_interval_ms = env.txn_send_retry_interval.unwrap_or(2000); // Default to 2000ms (2 seconds)
+    let txn_send_retry_interval_ms = env.txn_send_retry_interval.unwrap_or(2000) as u64; // Default to 2000ms (2 seconds) and convert to u64
 
     let txn_sender: Arc<TxnSenderImpl> = Arc::new(TxnSenderImpl::new(
         transaction_store.clone(),
