@@ -46,6 +46,15 @@ fn get_min_transaction_fee() -> u64 {
         .expect("MIN_TRANSACTION_FEE must be a valid integer")
 }
 
+fn get_txn_send_retry_interval() -> Duration {
+    let ms = env::var("TXN_SEND_RETRY_INTERVAL")
+        .unwrap_or_else(|_| "1000".to_string())  // Default to 1000ms if not set
+        .parse::<u64>()
+        .expect("TXN_SEND_RETRY_INTERVAL must be a valid integer");
+    
+    Duration::from_millis(ms)
+}
+
 #[async_trait]
 pub trait TxnSender: Send + Sync {
     fn send_transaction(&self, txn: TransactionData);
@@ -207,7 +216,7 @@ impl TxnSenderImpl {
                     let _ = transaction_store.remove_transaction(signature);
                     statsd_count!("transactions_reached_max_retries", 1);
                 }
-                sleep(Duration::from_secs(txn_send_retry_interval_seconds as u64)).await;
+                sleep(get_txn_send_retry_interval()).await;
             }
         });
     }
