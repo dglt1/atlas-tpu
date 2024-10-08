@@ -75,7 +75,7 @@ pub struct TxnSenderImpl {
     connection_cache: Arc<ConnectionCache>,
     solana_rpc: Arc<dyn SolanaRpc>,
     txn_sender_runtime: Arc<Runtime>,
-    txn_send_retry_interval_seconds: u64,
+    txn_send_retry_interval_ms: u64,
     max_retry_queue_size: Option<usize>,
     validator_info: Arc<Mutex<Vec<ValidatorInfo>>>,
     rpc_client: Arc<RpcClient>,
@@ -87,7 +87,7 @@ impl TxnSenderImpl {
         connection_cache: Arc<ConnectionCache>,
         solana_rpc: Arc<dyn SolanaRpc>,
         txn_sender_threads: usize,
-        txn_send_retry_interval_seconds: u64,
+        txn_send_retry_interval_ms: u64,
         max_retry_queue_size: Option<usize>,
     ) -> Self {
         // Initialize tracing subscriber only once
@@ -127,7 +127,7 @@ impl TxnSenderImpl {
             connection_cache,
             solana_rpc,
             txn_sender_runtime: Arc::new(txn_sender_runtime),
-            txn_send_retry_interval_seconds,
+            txn_send_retry_interval_ms,
             max_retry_queue_size,
             validator_info: validator_info.clone(),
             rpc_client: rpc_client.clone(),
@@ -159,7 +159,7 @@ impl TxnSenderImpl {
         let connection_cache = self.connection_cache.clone();
         let txn_sender_runtime = self.txn_sender_runtime.clone();
         let max_retry_queue_size = self.max_retry_queue_size;
-        let txn_send_retry_interval = Duration::from_secs(self.txn_send_retry_interval_seconds as u64);
+        let txn_send_retry_interval = Duration::from_millis(self.txn_send_retry_interval_ms as u64);
         let self_clone = self.clone();
 
         tokio::spawn(async move {
