@@ -21,7 +21,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use std::sync::Once;
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use tokio::time;
 use std::net::SocketAddr;
 
@@ -399,7 +399,7 @@ impl TxnSenderImpl {
             if let Ok(pubkey) = Pubkey::from_str(&node.pubkey) {
                 if validator_pubkeys.contains(&pubkey) {
                     if let Some(tpu_address) = node.tpu {
-                        if let Ok(socket_addr) = tpu_address.parse() {
+                        if let Ok(socket_addr) = tpu_address.parse::<SocketAddr>() {
                             updated_info.push(ValidatorInfo {
                                 pubkey,
                                 tpu_address: socket_addr,
@@ -442,7 +442,7 @@ impl TxnSenderImpl {
             if let Ok(pubkey) = Pubkey::from_str(&node.pubkey) {
                 if validator_pubkeys.contains(&pubkey) {
                     if let Some(tpu_address) = node.tpu {
-                        if let Ok(socket_addr) = tpu_address.parse() {
+                        if let Ok(socket_addr) = tpu_address.parse::<SocketAddr>() {
                             updated_info.push(ValidatorInfo {
                                 pubkey,
                                 tpu_address: socket_addr,
