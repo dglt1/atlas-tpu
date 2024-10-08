@@ -75,7 +75,7 @@ pub struct TxnSenderImpl {
     connection_cache: Arc<ConnectionCache>,
     solana_rpc: Arc<dyn SolanaRpc>,
     txn_sender_runtime: Arc<Runtime>,
-    txn_send_retry_interval_seconds: usize,
+    txn_send_retry_interval_seconds: u64,
     max_retry_queue_size: Option<usize>,
     validator_info: Arc<Mutex<Vec<ValidatorInfo>>>,
     rpc_client: Arc<RpcClient>,
@@ -87,7 +87,7 @@ impl TxnSenderImpl {
         connection_cache: Arc<ConnectionCache>,
         solana_rpc: Arc<dyn SolanaRpc>,
         txn_sender_threads: usize,
-        txn_send_retry_interval_seconds: usize,
+        txn_send_retry_interval_seconds: u64,
         max_retry_queue_size: Option<usize>,
     ) -> Self {
         // Initialize tracing subscriber only once
@@ -159,6 +159,7 @@ impl TxnSenderImpl {
         let connection_cache = self.connection_cache.clone();
         let txn_sender_runtime = self.txn_sender_runtime.clone();
         let max_retry_queue_size = self.max_retry_queue_size;
+        let txn_send_retry_interval = Duration::from_secs(self.txn_send_retry_interval_seconds as u64);
         let self_clone = self.clone();
 
         tokio::spawn(async move {
@@ -257,7 +258,7 @@ impl TxnSenderImpl {
                     let _ = transaction_store.remove_transaction(signature);
                     statsd_count!("transactions_reached_max_retries", 1);
                 }
-                sleep(Duration::from_secs(txn_send_retry_interval_seconds)).await;
+                sleep(txn_send_retry_interval).await;
             }
         });
     }
