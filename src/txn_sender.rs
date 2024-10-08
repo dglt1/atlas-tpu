@@ -4,20 +4,18 @@ use solana_client::{
     rpc_client::RpcClient,
 };
 use solana_program_runtime::compute_budget::{ComputeBudget, MAX_COMPUTE_UNIT_LIMIT};
-use solana_sdk::transaction::{self, VersionedTransaction};
+use solana_sdk::transaction::VersionedTransaction;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{
     runtime::{Builder, Runtime},
-    time::{error::Elapsed, sleep, timeout},
+    time::{sleep, timeout},
 };
 use tonic::async_trait;
 use tracing::{error, info, warn};
-use dashmap::DashMap;
 use tracing_subscriber::{EnvFilter, fmt::Subscriber};
-use tracing_subscriber::util::SubscriberInitExt;
 use std::sync::Once;
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
@@ -399,14 +397,12 @@ impl TxnSenderImpl {
             if let Ok(pubkey) = Pubkey::from_str(&node.pubkey) {
                 if validator_pubkeys.contains(&pubkey) {
                     if let Some(tpu_address) = node.tpu {
-                        if let Ok(socket_addr) = tpu_address.parse::<SocketAddr>() {
-                            updated_info.push(ValidatorInfo {
-                                pubkey,
-                                tpu_address: socket_addr,
-                                last_updated: Instant::now(),
-                            });
-                            info!("Updated info for validator {}: TPU address {}", pubkey, socket_addr);
-                        }
+                        updated_info.push(ValidatorInfo {
+                            pubkey,
+                            tpu_address,
+                            last_updated: Instant::now(),
+                        });
+                        info!("Updated info for validator {}: TPU address {}", pubkey, tpu_address);
                     }
                 }
             }
@@ -442,14 +438,12 @@ impl TxnSenderImpl {
             if let Ok(pubkey) = Pubkey::from_str(&node.pubkey) {
                 if validator_pubkeys.contains(&pubkey) {
                     if let Some(tpu_address) = node.tpu {
-                        if let Ok(socket_addr) = tpu_address.parse::<SocketAddr>() {
-                            updated_info.push(ValidatorInfo {
-                                pubkey,
-                                tpu_address: socket_addr,
-                                last_updated: Instant::now(),
-                            });
-                            info!("Updated info for validator {}: TPU address {}", pubkey, socket_addr);
-                        }
+                        updated_info.push(ValidatorInfo {
+                            pubkey,
+                            tpu_address,
+                            last_updated: Instant::now(),
+                        });
+                        info!("Updated info for validator {}: TPU address {}", pubkey, tpu_address);
                     }
                 }
             }
