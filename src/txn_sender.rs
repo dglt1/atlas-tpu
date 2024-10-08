@@ -1,6 +1,7 @@
 use cadence_macros::{statsd_count, statsd_gauge, statsd_time};
 use solana_client::{
     connection_cache::ConnectionCache, nonblocking::tpu_connection::TpuConnection,
+    rpc_client::RpcClient,
 };
 use solana_program_runtime::compute_budget::{ComputeBudget, MAX_COMPUTE_UNIT_LIMIT};
 use solana_sdk::transaction::{self, VersionedTransaction};
@@ -18,6 +19,10 @@ use dashmap::DashMap;
 use tracing_subscriber::{EnvFilter, fmt::Subscriber};
 use tracing_subscriber::util::SubscriberInitExt;
 use std::sync::Once;
+use solana_sdk::pubkey::Pubkey;
+use std::str::FromStr;
+use std::sync::{Arc, Mutex};
+use tokio::time;
 
 use crate::{
     leader_tracker::LeaderTracker,
@@ -55,6 +60,12 @@ fn get_txn_send_retry_interval() -> Duration {
     Duration::from_millis(ms)
 }
 
+struct ValidatorInfo {
+    pubkey: Pubkey,
+    tpu_address: String,
+    last_updated: Instant,
+}
+
 #[async_trait]
 pub trait TxnSender: Send + Sync {
     fn send_transaction(&self, txn: TransactionData);
@@ -68,6 +79,8 @@ pub struct TxnSenderImpl {
     txn_sender_runtime: Arc<Runtime>,
     txn_send_retry_interval_seconds: usize,
     max_retry_queue_size: Option<usize>,
+    validator_info: Arc<Mutex<Vec<ValidatorInfo>>>,
+    rpc_client: Arc<RpcClient>,
 }
 
 impl TxnSenderImpl {
@@ -100,7 +113,19 @@ impl TxnSenderImpl {
             .enable_all()
             .build()
             .unwrap();
-        let txn_sender = Self {
+
+        let validator_pubkeys = env::var("VALIDATOR_PUBKEYS")
+            .expect("VALIDATOR_PUBKEYS must be set")
+            .split(',')
+            .map(|s| Pubkey::from_str(s).expect("Invalid pubkey"))
+            .collect::<Vec<_>>();
+
+        let rpc_url = env::var("RPC_URL").unwrap_or_else(|_| "http://localhost:8899".to_string());
+        let rpc_client = Arc::new(RpcClient::new(rpc_url));
+
+        let validator_info = Arc::new(Mutex::new(Vec::new()));
+
+        let sender = Self {
             leader_tracker,
             transaction_store,
             connection_cache,
@@ -108,9 +133,29 @@ impl TxnSenderImpl {
             txn_sender_runtime: Arc::new(txn_sender_runtime),
             txn_send_retry_interval_seconds,
             max_retry_queue_size,
+            validator_info: validator_info.clone(),
+            rpc_client: rpc_client.clone(),
         };
-        txn_sender.retry_transactions();
-        txn_sender
+
+        // Update validator info immediately
+        sender.update_validator_info(&validator_pubkeys);
+
+        // Start a background task to update validator info periodically
+        let validator_pubkeys = validator_pubkeys.clone();
+        tokio::spawn(async move {
+            let mut interval = time::interval(Duration::from_secs(600)); // 10 minutes
+
+            loop {
+                // Wait for the next interval tick
+                interval.tick().await;
+
+                // Update validator info
+                Self::update_validator_info_task(validator_info.clone(), rpc_client.clone(), &validator_pubkeys).await;
+            }
+        });
+
+        sender.retry_transactions();
+        sender
     }
 
     fn retry_transactions(&self) {
@@ -277,7 +322,7 @@ impl TxnSenderImpl {
 
     fn send_to_tpu_peers(&self, wire_transaction: Vec<u8>) {
         // List of TPU peers
-        let tpu_peers = get_tpu_peers();
+        let tpu_peers = self.get_tpu_addresses();
 
         for peer in tpu_peers {
             let connection_cache = self.connection_cache.clone();
@@ -335,6 +380,80 @@ impl TxnSenderImpl {
             );
             statsd_count!("transactions_dropped_insufficient_fee", 1);
         }
+    }
+
+    fn update_validator_info(&self, validator_pubkeys: &[Pubkey]) {
+        info!("Updating validator info for {} pubkeys...", validator_pubkeys.len());
+        let cluster_nodes = match self.rpc_client.get_cluster_nodes() {
+            Ok(nodes) => nodes,
+            Err(e) => {
+                error!("Failed to get cluster nodes: {}", e);
+                return;
+            }
+        };
+
+        let mut updated_info = Vec::new();
+
+        for node in cluster_nodes {
+            if let Ok(pubkey) = Pubkey::from_str(&node.pubkey) {
+                if validator_pubkeys.contains(&pubkey) {
+                    let tpu_address = node.tpu.clone().unwrap_or_default();
+                    updated_info.push(ValidatorInfo {
+                        pubkey,
+                        tpu_address: tpu_address.clone(),
+                        last_updated: Instant::now(),
+                    });
+                    info!("Updated info for validator {}: TPU address {}", pubkey, tpu_address);
+                }
+            }
+        }
+
+        let mut validator_info = self.validator_info.lock().unwrap();
+        *validator_info = updated_info;
+        info!("Validator info update complete. Updated {} validators.", updated_info.len());
+
+        if updated_info.len() < validator_pubkeys.len() {
+            warn!("Some validators were not found in the cluster nodes. Expected {}, found {}.", 
+                  validator_pubkeys.len(), updated_info.len());
+        }
+    }
+
+    async fn update_validator_info_task(
+        validator_info: Arc<Mutex<Vec<ValidatorInfo>>>,
+        rpc_client: Arc<RpcClient>,
+        validator_pubkeys: &[Pubkey],
+    ) {
+        info!("Updating validator info in background task...");
+        let cluster_nodes = match rpc_client.get_cluster_nodes() {
+            Ok(nodes) => nodes,
+            Err(e) => {
+                error!("Failed to get cluster nodes in background task: {}", e);
+                return;
+            }
+        };
+
+        let mut updated_info = Vec::new();
+
+        for node in cluster_nodes {
+            if let Ok(pubkey) = Pubkey::from_str(&node.pubkey) {
+                if validator_pubkeys.contains(&pubkey) {
+                    updated_info.push(ValidatorInfo {
+                        pubkey,
+                        tpu_address: node.tpu.unwrap_or_default(),
+                        last_updated: Instant::now(),
+                    });
+                }
+            }
+        }
+
+        let mut validator_info = validator_info.lock().unwrap();
+        *validator_info = updated_info;
+        info!("Validator info updated successfully in background task");
+    }
+
+    fn get_tpu_addresses(&self) -> Vec<String> {
+        let validator_info = self.validator_info.lock().unwrap();
+        validator_info.iter().map(|info| info.tpu_address.clone()).collect()
     }
 }
 
@@ -410,14 +529,6 @@ fn bin_counter_to_tag(counter: Option<i32>, bins: &Vec<i32>) -> String {
         bin_end = bin.to_string();
     }
     format!("{}_{}", bin_start, bin_end)
-}
-
-fn get_tpu_peers() -> Vec<String> {
-    env::var("TPU_PEERS")
-        .expect("TPU_PEERS environment variable not set")
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .collect()
 }
 
 #[test]
