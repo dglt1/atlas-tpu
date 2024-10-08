@@ -20,7 +20,7 @@ use figment::{providers::Env, Figment};
 use grpc_geyser::GrpcGeyserImpl;
 use jsonrpsee::server::{middleware::ProxyGetRequestLayer, ServerBuilder};
 use serde::Deserialize;
-use solana_client::{connection_cache::ConnectionCache, rpc_client::RpcClient};
+use solana_client::connection_cache::ConnectionCache;
 use solana_sdk::signature::{read_keypair_file, Keypair};
 use tracing::{error, info};
 use transaction_store::TransactionStoreImpl;
@@ -107,6 +107,7 @@ async fn main() -> anyhow::Result<()> {
         env.grpc_url.clone().unwrap(),
         env.x_token.clone(),
     ));
+    let txn_send_retry_interval_seconds = env.txn_send_retry_interval.unwrap_or(2);
     let txn_sender: Arc<TxnSenderImpl> = Arc::new(TxnSenderImpl::new(
         transaction_store.clone(),
         connection_cache,
