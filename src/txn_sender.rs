@@ -69,6 +69,7 @@ pub trait TxnSender: Send + Sync {
     fn send_transaction(&self, txn: TransactionData);
 }
 
+#[derive(Clone)]
 pub struct TxnSenderImpl {
     transaction_store: Arc<dyn TransactionStore>,
     connection_cache: Arc<ConnectionCache>,
@@ -158,7 +159,7 @@ impl TxnSenderImpl {
         let connection_cache = self.connection_cache.clone();
         let txn_sender_runtime = self.txn_sender_runtime.clone();
         let max_retry_queue_size = self.max_retry_queue_size;
-        let get_tpu_addresses = self.get_tpu_addresses();
+        let self_clone = self.clone();  // Clone self to move into the async block
 
         tokio::spawn(async move {
             loop {
@@ -207,6 +208,10 @@ impl TxnSenderImpl {
                         transaction_data.retry_count += 1;
                     }
                 }
+
+                // Move get_tpu_addresses() call inside the loop
+                let get_tpu_addresses = self_clone.get_tpu_addresses();
+
                 for wire_transaction in wire_transactions.iter() {
                     for peer in &get_tpu_addresses {
                         if let Ok(socket_addr) = peer.parse::<std::net::SocketAddr>() {
