@@ -24,7 +24,6 @@ use tokio::time;
 use std::net::SocketAddr;
 
 use crate::{
-    leader_tracker::LeaderTracker,
     solana_rpc::SolanaRpc,
     transaction_store::{get_signature, TransactionData, TransactionStore},
 };
@@ -71,7 +70,6 @@ pub trait TxnSender: Send + Sync {
 }
 
 pub struct TxnSenderImpl {
-    leader_tracker: Arc<dyn LeaderTracker>,
     transaction_store: Arc<dyn TransactionStore>,
     connection_cache: Arc<ConnectionCache>,
     solana_rpc: Arc<dyn SolanaRpc>,
@@ -84,7 +82,6 @@ pub struct TxnSenderImpl {
 
 impl TxnSenderImpl {
     pub fn new(
-        leader_tracker: Arc<dyn LeaderTracker>,
         transaction_store: Arc<dyn TransactionStore>,
         connection_cache: Arc<ConnectionCache>,
         solana_rpc: Arc<dyn SolanaRpc>,
@@ -125,7 +122,6 @@ impl TxnSenderImpl {
         let validator_info = Arc::new(Mutex::new(Vec::new()));
 
         let sender = Self {
-            leader_tracker,
             transaction_store,
             connection_cache,
             solana_rpc,
@@ -158,7 +154,6 @@ impl TxnSenderImpl {
     }
 
     fn retry_transactions(&self) {
-        let leader_tracker = self.leader_tracker.clone();
         let transaction_store = self.transaction_store.clone();
         let connection_cache = self.connection_cache.clone();
         let txn_sender_runtime = self.txn_sender_runtime.clone();
@@ -212,45 +207,44 @@ impl TxnSenderImpl {
                 }
                 for wire_transaction in wire_transactions.iter() {
                     let mut leader_num = 0;
-                    for leader in leader_tracker.get_leaders() {
-                        if leader.tpu_quic.is_none() {
-                            error!("leader {:?} has no tpu_quic", leader);
-                            continue;
-                        }
-                        let connection_cache = connection_cache.clone();
-                        let sent_at = Instant::now();
-                        let leader = Arc::new(leader.clone());
-                        let wire_transaction = wire_transaction.clone();
-                        txn_sender_runtime.spawn(async move {
-                        // retry unless its a timeout
-                        for i in 0..SEND_TXN_RETRIES {
-                            let conn = connection_cache
-                                .get_nonblocking_connection(&leader.tpu_quic.unwrap());
-                            if let Ok(result) = timeout(MAX_TIMEOUT_SEND_DATA_BATCH, conn.send_data(&wire_transaction)).await {
-                                if let Err(e) = result {
-                                    if i == SEND_TXN_RETRIES-1 {
-                                        error!(
-                                            retry = "true",
-                                            "Failed to send transaction batch to {:?}: {}",
-                                            leader, e
-                                        );
-                                        statsd_count!("transaction_send_error", 1, "retry" => "true", "last_attempt" => "true");
+                    for peer in self.get_tpu_addresses() {
+                        if let Ok(socket_addr) = peer.parse::<std::net::SocketAddr>() {
+                            let connection_cache = connection_cache.clone();
+                            let sent_at = Instant::now();
+                            let wire_transaction = wire_transaction.clone();
+                            txn_sender_runtime.spawn(async move {
+                                // retry unless its a timeout
+                                for i in 0..SEND_TXN_RETRIES {
+                                    let conn = connection_cache
+                                        .get_nonblocking_connection(&socket_addr);
+                                    if let Ok(result) = timeout(MAX_TIMEOUT_SEND_DATA_BATCH, conn.send_data(&wire_transaction)).await {
+                                        if let Err(e) = result {
+                                            if i == SEND_TXN_RETRIES-1 {
+                                                error!(
+                                                    retry = "true",
+                                                    "Failed to send transaction batch to {:?}: {}",
+                                                    peer, e
+                                                );
+                                                statsd_count!("transaction_send_error", 1, "retry" => "true", "last_attempt" => "true");
+                                            } else {
+                                                statsd_count!("transaction_send_error", 1, "retry" => "true", "last_attempt" => "false");
+                                            }
+                                        } else {
+                                            let leader_num_str = leader_num.to_string();
+                                            statsd_time!(
+                                                "transaction_received_by_leader",
+                                                sent_at.elapsed(), "leader_num" => &leader_num_str, "api_key" => "not_applicable", "retry" => "true");
+                                            return;
+                                        }
                                     } else {
-                                        statsd_count!("transaction_send_error", 1, "retry" => "true", "last_attempt" => "false");
+                                        // Note: This is far too frequent to log. It will fill the disks on the host and cost too much on DD.
+                                        statsd_count!("transaction_send_timeout", 1);
                                     }
-                                } else {
-                                    let leader_num_str = leader_num.to_string();
-                                    statsd_time!(
-                                        "transaction_received_by_leader",
-                                        sent_at.elapsed(), "leader_num" => &leader_num_str, "api_key" => "not_applicable", "retry" => "true");
-                                    return;
                                 }
-                            } else {
-                                // Note: This is far too frequent to log. It will fill the disks on the host and cost too much on DD.
-                                statsd_count!("transaction_send_timeout", 1);
-                            }
+                            });
+                        } else {
+                            error!("Invalid socket address: {}", peer);
                         }
-                    });
                         leader_num += 1;
                     }
                 }

@@ -19,8 +19,6 @@ use cadence_macros::set_global_default;
 use figment::{providers::Env, Figment};
 use grpc_geyser::GrpcGeyserImpl;
 use jsonrpsee::server::{middleware::ProxyGetRequestLayer, ServerBuilder};
-use leader_tracker::LeaderTrackerImpl;
-use rpc_server::{AtlasTxnSenderImpl, AtlasTxnSenderServer};
 use serde::Deserialize;
 use solana_client::{connection_cache::ConnectionCache, rpc_client::RpcClient};
 use solana_sdk::signature::{read_keypair_file, Keypair};
@@ -118,8 +116,7 @@ async fn main() -> anyhow::Result<()> {
         leader_offset,
     ));
     let txn_send_retry_interval_seconds = env.txn_send_retry_interval.unwrap_or(2);
-    let txn_sender = Arc::new(TxnSenderImpl::new(
-        leader_tracker,
+    let txn_sender: Arc<TxnSenderImpl> = Arc::new(TxnSenderImpl::new(
         transaction_store.clone(),
         connection_cache,
         solana_rpc,
