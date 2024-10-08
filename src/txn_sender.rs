@@ -395,13 +395,20 @@ impl TxnSenderImpl {
         for node in cluster_nodes {
             if let Ok(pubkey) = Pubkey::from_str(&node.pubkey) {
                 if validator_pubkeys.contains(&pubkey) {
-                    if let Some(tpu_address) = node.tpu {
-                        updated_info.push(ValidatorInfo {
-                            pubkey,
-                            tpu_address,
-                            last_updated: Instant::now(),
-                        });
-                        info!("Updated info for validator {}: TPU address {}", pubkey, tpu_address);
+                    // Use tpuQuic instead of tpu
+                    if let Some(tpu_quic_address) = node.tpu_quic {
+                        if let Ok(socket_addr) = tpu_quic_address.parse() {
+                            updated_info.push(ValidatorInfo {
+                                pubkey,
+                                tpu_address: socket_addr,
+                                last_updated: Instant::now(),
+                            });
+                            info!("Updated info for validator {}: TPU QUIC address {}", pubkey, tpu_quic_address);
+                        } else {
+                            warn!("Failed to parse TPU QUIC address for validator {}: {}", pubkey, tpu_quic_address);
+                        }
+                    } else {
+                        warn!("No TPU QUIC address found for validator {}", pubkey);
                     }
                 }
             }
@@ -438,13 +445,20 @@ impl TxnSenderImpl {
         for node in cluster_nodes {
             if let Ok(pubkey) = Pubkey::from_str(&node.pubkey) {
                 if validator_pubkeys.contains(&pubkey) {
-                    if let Some(tpu_address) = node.tpu {
-                        updated_info.push(ValidatorInfo {
-                            pubkey,
-                            tpu_address,
-                            last_updated: Instant::now(),
-                        });
-                        info!("Updated info for validator {}: TPU address {}", pubkey, tpu_address);
+                    // Use tpuQuic instead of tpu
+                    if let Some(tpu_quic_address) = node.tpu_quic {
+                        if let Ok(socket_addr) = tpu_quic_address.parse() {
+                            updated_info.push(ValidatorInfo {
+                                pubkey,
+                                tpu_address: socket_addr,
+                                last_updated: Instant::now(),
+                            });
+                            info!("Updated info for validator {}: TPU QUIC address {}", pubkey, tpu_quic_address);
+                        } else {
+                            warn!("Failed to parse TPU QUIC address for validator {}: {}", pubkey, tpu_quic_address);
+                        }
+                    } else {
+                        warn!("No TPU QUIC address found for validator {}", pubkey);
                     }
                 }
             }
