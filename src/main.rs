@@ -25,6 +25,7 @@ use solana_sdk::signature::{read_keypair_file, Keypair};
 use tracing::{error, info};
 use transaction_store::TransactionStoreImpl;
 use txn_sender::TxnSenderImpl;
+use crate::rpc_server::AtlasTxnSenderImpl;
 
 #[derive(Debug, Deserialize)]
 struct AtlasTxnSenderEnv {
@@ -109,12 +110,6 @@ async fn main() -> anyhow::Result<()> {
     let rpc_client = Arc::new(RpcClient::new(env.rpc_url.unwrap()));
     let num_leaders = env.num_leaders.unwrap_or(2);
     let leader_offset = env.leader_offset.unwrap_or(0);
-    let leader_tracker = Arc::new(LeaderTrackerImpl::new(
-        rpc_client,
-        solana_rpc.clone(),
-        num_leaders,
-        leader_offset,
-    ));
     let txn_send_retry_interval_seconds = env.txn_send_retry_interval.unwrap_or(2);
     let txn_sender: Arc<TxnSenderImpl> = Arc::new(TxnSenderImpl::new(
         transaction_store.clone(),
@@ -125,8 +120,7 @@ async fn main() -> anyhow::Result<()> {
         env.max_retry_queue_size,
     ));
     let max_txn_send_retries = env.max_txn_send_retries.unwrap_or(5);
-    let atlas_txn_sender =
-        AtlasTxnSenderImpl::new(txn_sender, transaction_store, max_txn_send_retries);
+    let atlas_txn_sender = AtlasTxnSenderImpl::new(txn_sender, transaction_store, max_txn_send_retries);
     let handle = server.start(atlas_txn_sender.into_rpc());
     handle.stopped().await;
     Ok(())
