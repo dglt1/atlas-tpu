@@ -162,7 +162,6 @@ impl TxnSenderImpl {
         let transaction_store = self.transaction_store.clone();
         let connection_cache = self.connection_cache.clone();
         let txn_sender_runtime = self.txn_sender_runtime.clone();
-        let txn_send_retry_interval_seconds = self.txn_send_retry_interval_seconds.clone();
         let max_retry_queue_size = self.max_retry_queue_size.clone();
         tokio::spawn(async move {
             loop {
@@ -408,14 +407,15 @@ impl TxnSenderImpl {
             }
         }
 
-        let mut validator_info = self.validator_info.lock().unwrap();
         let updated_info_len = updated_info.len();
+        let expected_len = validator_pubkeys.len();
+        let mut validator_info = self.validator_info.lock().unwrap();
         *validator_info = updated_info;
         info!("Validator info update complete. Updated {} validators.", updated_info_len);
 
-        if updated_info.len() < validator_pubkeys.len() {
+        if updated_info_len < expected_len {
             warn!("Some validators were not found in the cluster nodes. Expected {}, found {}.", 
-                  validator_pubkeys.len(), updated_info.len());
+                  expected_len, updated_info_len);
         }
     }
 
