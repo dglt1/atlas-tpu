@@ -108,12 +108,13 @@ async fn main() -> anyhow::Result<()> {
         env.x_token.clone(),
     ));
     let txn_send_retry_interval_seconds = env.txn_send_retry_interval.unwrap_or(2);
+
     let txn_sender: Arc<TxnSenderImpl> = Arc::new(TxnSenderImpl::new(
         transaction_store.clone(),
         connection_cache,
         solana_rpc,
         env.txn_sender_threads.unwrap_or(4),
-        txn_send_retry_interval_seconds,
+        txn_send_retry_interval_seconds as u64,  // Convert to u64
         env.max_retry_queue_size,
     ));
     let max_txn_send_retries = env.max_txn_send_retries.unwrap_or(5);
