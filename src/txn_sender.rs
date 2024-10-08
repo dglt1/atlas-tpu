@@ -22,6 +22,7 @@ use std::str::FromStr;
 use std::sync::Mutex;
 use tokio::time;
 use std::net::SocketAddr;
+use std::collections::HashMap;
 
 use crate::{
     solana_rpc::SolanaRpc,
@@ -37,6 +38,8 @@ const MAX_RETRIES_BINS: [i32; 5] = [0, 1, 5, 10, 30];
 const MAX_TIMEOUT_SEND_DATA: Duration = Duration::from_millis(500);
 const MAX_TIMEOUT_SEND_DATA_BATCH: Duration = Duration::from_millis(500);
 const SEND_TXN_RETRIES: usize = 10;
+const MAX_SIGNATURE_SEND_COUNT: usize = 50;
+const SIGNATURE_EXPIRY_DURATION: Duration = Duration::from_secs(3600); // 1 hour
 
 // Add this at the top of your file, outside of any function
 static TRACING_INIT: Once = Once::new();
@@ -79,6 +82,7 @@ pub struct TxnSenderImpl {
     max_retry_queue_size: Option<usize>,
     validator_info: Arc<Mutex<Vec<ValidatorInfo>>>,
     rpc_client: Arc<RpcClient>,
+    signature_send_count: Arc<Mutex<HashMap<String, (usize, Instant)>>>,
 }
 
 impl TxnSenderImpl {
@@ -122,6 +126,20 @@ impl TxnSenderImpl {
 
         let validator_info = Arc::new(Mutex::new(Vec::new()));
 
+        let signature_send_count = Arc::new(Mutex::new(HashMap::new()));
+        let signature_send_count_clone = signature_send_count.clone();
+
+        // Start a background task to clean up old entries
+        tokio::spawn(async move {
+            let mut cleanup_interval = time::interval(Duration::from_secs(600)); // Every 10 minutes
+            loop {
+                cleanup_interval.tick().await;
+                let mut map = signature_send_count_clone.lock().unwrap();
+                let now = Instant::now();
+                map.retain(|_, &mut (_, last_updated)| now.duration_since(last_updated) < SIGNATURE_EXPIRY_DURATION);
+            }
+        });
+
         let sender = Self {
             transaction_store,
             connection_cache,
@@ -131,6 +149,7 @@ impl TxnSenderImpl {
             max_retry_queue_size,
             validator_info: validator_info.clone(),
             rpc_client: rpc_client.clone(),
+            signature_send_count,
         };
 
         // Update validator info immediately
@@ -317,7 +336,18 @@ impl TxnSenderImpl {
         });
     }
 
-    fn send_to_tpu_peers(&self, wire_transaction: Vec<u8>) {
+    fn send_to_tpu_peers(&self, wire_transaction: Vec<u8>, signature: String) {
+        let mut signature_send_count = self.signature_send_count.lock().unwrap();
+        let entry = signature_send_count.entry(signature.clone()).or_insert((0, Instant::now()));
+        
+        if entry.0 >= MAX_SIGNATURE_SEND_COUNT {
+            warn!("Transaction with signature {} dropped due to exceeding send limit", signature);
+            return;
+        }
+
+        entry.0 += 1;
+        entry.1 = Instant::now(); // Update the last updated time
+
         // List of TPU peers
         let tpu_peers = self.get_tpu_addresses();
 
@@ -369,7 +399,7 @@ impl TxnSenderImpl {
         if priority_details.fee >= min_fee {
             info!("Transaction accepted: Signature: {}, Fee: {} lamports", signature, priority_details.fee);
             self.track_transaction(&transaction_data);
-            self.send_to_tpu_peers(transaction_data.wire_transaction.clone());
+            self.send_to_tpu_peers(transaction_data.wire_transaction.clone(), signature);
         } else {
             warn!(
                 "Transaction dropped: Signature: {}, Insufficient fee. Required: {} lamports, Actual: {} lamports",
