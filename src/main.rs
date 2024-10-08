@@ -107,10 +107,6 @@ async fn main() -> anyhow::Result<()> {
         env.grpc_url.clone().unwrap(),
         env.x_token.clone(),
     ));
-    let rpc_client = Arc::new(RpcClient::new(env.rpc_url.unwrap()));
-    let num_leaders = env.num_leaders.unwrap_or(2);
-    let leader_offset = env.leader_offset.unwrap_or(0);
-    let txn_send_retry_interval_seconds = env.txn_send_retry_interval.unwrap_or(2);
     let txn_sender: Arc<TxnSenderImpl> = Arc::new(TxnSenderImpl::new(
         transaction_store.clone(),
         connection_cache,

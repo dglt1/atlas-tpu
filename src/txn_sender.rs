@@ -157,7 +157,9 @@ impl TxnSenderImpl {
         let transaction_store = self.transaction_store.clone();
         let connection_cache = self.connection_cache.clone();
         let txn_sender_runtime = self.txn_sender_runtime.clone();
-        let max_retry_queue_size = self.max_retry_queue_size.clone();
+        let max_retry_queue_size = self.max_retry_queue_size;
+        let get_tpu_addresses = self.get_tpu_addresses();
+
         tokio::spawn(async move {
             loop {
                 let mut transactions_reached_max_retries = vec![];
@@ -206,8 +208,7 @@ impl TxnSenderImpl {
                     }
                 }
                 for wire_transaction in wire_transactions.iter() {
-                    let mut leader_num = 0;
-                    for peer in self.get_tpu_addresses() {
+                    for peer in &get_tpu_addresses {
                         if let Ok(socket_addr) = peer.parse::<std::net::SocketAddr>() {
                             let connection_cache = connection_cache.clone();
                             let sent_at = Instant::now();
@@ -230,7 +231,7 @@ impl TxnSenderImpl {
                                                 statsd_count!("transaction_send_error", 1, "retry" => "true", "last_attempt" => "false");
                                             }
                                         } else {
-                                            let leader_num_str = leader_num.to_string();
+                                            let leader_num_str = "0".to_string();
                                             statsd_time!(
                                                 "transaction_received_by_leader",
                                                 sent_at.elapsed(), "leader_num" => &leader_num_str, "api_key" => "not_applicable", "retry" => "true");
@@ -245,7 +246,6 @@ impl TxnSenderImpl {
                         } else {
                             error!("Invalid socket address: {}", peer);
                         }
-                        leader_num += 1;
                     }
                 }
                 // remove transactions that reached max retries
