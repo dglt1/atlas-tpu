@@ -17,6 +17,22 @@ pub struct TransactionData {
     pub request_metadata: Option<RequestMetadata>,
 }
 
+impl TransactionData {
+    pub fn from_versioned_transaction(transaction: VersionedTransaction) -> Self {
+        // Assuming you have a way to get the wire transaction bytes
+        let wire_transaction = transaction.serialize(); // You might need to implement this method
+
+        TransactionData {
+            wire_transaction,
+            versioned_transaction: transaction,
+            sent_at: Instant::now(),
+            retry_count: 0,
+            max_retries: 5, // Default or configurable value
+            request_metadata: None, // Or populate if you have metadata
+        }
+    }
+}
+
 pub trait TransactionStore: Send + Sync {
     fn add_transaction(&self, transaction: TransactionData);
     fn get_signatures(&self) -> Vec<String>;

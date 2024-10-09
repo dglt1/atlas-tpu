@@ -572,8 +572,8 @@ impl TxnSenderImpl {
                 .expect("RPC_URL must be a valid address");
             self.send_transaction_to_peer(&transaction, &rpc_addr).await;
         } else {
-            // Convert VersionedTransaction to TransactionData if needed
-            let transaction_data = TransactionData::from(transaction); // Implement this conversion
+            // Convert VersionedTransaction to TransactionData
+            let transaction_data = TransactionData::from_versioned_transaction(transaction);
             self.forward_to_leaders(&transaction_data);
         }
     }
