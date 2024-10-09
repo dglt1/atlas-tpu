@@ -558,10 +558,23 @@ impl TxnSenderImpl {
     pub async fn process_transaction(&self, transaction: VersionedTransaction) {
         let priority_details = compute_priority_details(&transaction);
         
-        if priority_details.priority >= self.config.min_priority {
-            self.send_transaction_to_peer(&transaction, &self.rpc_addr).await;
+        // Use the environment variable for min_priority if available
+        let min_priority = env::var("MIN_PRIORITY")
+            .unwrap_or_else(|_| "0".to_string())
+            .parse::<u64>()
+            .expect("MIN_PRIORITY must be a valid integer");
+
+        if priority_details.priority >= min_priority {
+            // Use the RPC_URL from the environment
+            let rpc_addr = env::var("RPC_URL")
+                .expect("RPC_URL must be set")
+                .parse()
+                .expect("RPC_URL must be a valid address");
+            self.send_transaction_to_peer(&transaction, &rpc_addr).await;
         } else {
-            self.forward_to_leaders(&transaction).await;
+            // Convert VersionedTransaction to TransactionData if needed
+            let transaction_data = TransactionData::from(transaction); // Implement this conversion
+            self.forward_to_leaders(&transaction_data);
         }
     }
 }
