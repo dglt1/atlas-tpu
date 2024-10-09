@@ -524,15 +524,9 @@ impl TxnSenderImpl {
     // Add this new method to forward transactions to leaders
     fn forward_to_leaders(&self, transaction_data: &TransactionData) {
         let leaders = self.leader_tracker.get_leaders();
-        if leaders.is_empty() {
-            warn!("No leaders available. Dropping transaction: {}", transaction_data.versioned_transaction.signatures[0]);
-            statsd_count!("transactions_dropped_no_leaders", 1);
-        } else {
-            for leader in leaders {
-                if let Some(tpu_address) = leader.tpu {
-                    info!("Forwarding transaction to leader: {}", leader.pubkey);
-                    self.send_to_tpu_peer(&transaction_data.wire_transaction, tpu_address);
-                }
+        for leader in leaders {
+            if let Some(tpu_address) = leader.tpu {
+                self.send_to_tpu_peer(&transaction_data.wire_transaction, tpu_address.to_string());
             }
         }
     }
