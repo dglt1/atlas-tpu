@@ -137,6 +137,12 @@ impl LeaderTrackerImpl {
             self.cur_leaders.remove(&slot);
         }
     }
+
+    fn update_leaders(&self) {
+        // Ensure leaders are being updated correctly
+        let new_leaders = fetch_leaders_from_rpc(); // Implement this function
+        self.cur_leaders = new_leaders;
+    }
 }
 
 fn _get_start_slot(next_slot: u64, leader_offset: i64) -> u64 {
