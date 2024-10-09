@@ -569,6 +569,19 @@ impl TxnSenderImpl {
             }
         });
     }
+
+    pub async fn run(&self) {
+        let mut interval = time::interval(Duration::from_secs(10)); // Log every 60 seconds
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    let leaders = self.leader_tracker.get_leaders();
+                    info!("Current leaders: {:?}", leaders.iter().map(|l| &l.pubkey).collect::<Vec<_>>());
+                }
+                // ... other async operations ...
+            }
+        }
+    }
 }
 
 pub struct PriorityDetails {
