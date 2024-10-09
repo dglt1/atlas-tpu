@@ -123,98 +123,11 @@ impl TxnSenderImpl {
         let signature_send_count = Arc::new(Mutex::new(HashMap::new()));
         let max_signature_send_count = get_max_signature_send_count();
 
-        Self {
-            transaction_store,
-            connection_cache,
-            solana_rpc,
-            txn_sender_runtime,
-            txn_send_retry_interval_ms,
-            max_retry_queue_size,
-            validator_info,
-            rpc_client,
-            signature_send_count,
-            max_signature_send_count,
-            leader_tracker,
-            num_leaders,
-            txn_sender_threads,
-        }
-    }
-
-    // ... rest of the implementation ...
-}
-
-impl TxnSenderImpl {
-    pub fn new(
-        transaction_store: Arc<dyn TransactionStore>,
-        connection_cache: Arc<ConnectionCache>,
-        solana_rpc: Arc<dyn SolanaRpc>,
-        txn_sender_threads: usize,
-        txn_send_retry_interval_ms: u64,
-        max_retry_queue_size: Option<usize>,
-        rpc_client: Arc<RpcClient>,
-        num_leaders: usize,
-        leader_offset: i64,
-    ) -> Self {
-        // Initialize tracing subscriber only once
-        TRACING_INIT.call_once(|| {
-            let env_filter = EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info"));
-
-            let subscriber = Subscriber::builder()
-                .with_env_filter(env_filter)
-                .finish();
-
-            // Use set_global_default instead of try_init
-            if let Err(e) = tracing::subscriber::set_global_default(subscriber) {
-                eprintln!("Warning: Failed to set global default subscriber: {}", e);
-            }
-        });
-
-        let txn_sender_runtime = Builder::new_multi_thread()
-            .worker_threads(txn_sender_threads)
-            .enable_all()
-            .build()
-            .unwrap();
-
-        let validator_pubkeys = env::var("VALIDATOR_PUBKEYS")
-            .expect("VALIDATOR_PUBKEYS must be set")
-            .split(',')
-            .map(|s| Pubkey::from_str(s).expect("Invalid pubkey"))
-            .collect::<Vec<_>>();
-
-        let rpc_url = env::var("RPC_URL").unwrap_or_else(|_| "http://localhost:8899".to_string());
-        let rpc_client = Arc::new(RpcClient::new(rpc_url));
-
-        let validator_info = Arc::new(Mutex::new(Vec::new()));
-
-        let signature_send_count = Arc::new(Mutex::new(HashMap::new()));
-        let signature_send_count_clone = signature_send_count.clone();
-
-        // Start a background task to clean up old entries
-        tokio::spawn(async move {
-            let mut cleanup_interval = time::interval(Duration::from_secs(600)); // Every 10 minutes
-            loop {
-                cleanup_interval.tick().await;
-                let mut map = signature_send_count_clone.lock().unwrap();
-                let now = Instant::now();
-                map.retain(|_, &mut (_, last_updated)| now.duration_since(last_updated) < SIGNATURE_EXPIRY_DURATION);
-            }
-        });
-
-        let max_signature_send_count = get_max_signature_send_count();
-
-        let leader_tracker = Arc::new(LeaderTrackerImpl::new(
-            rpc_client.clone(),
-            solana_rpc.clone(),
-            num_leaders,
-            leader_offset,
-        ));
-
         let sender = Self {
             transaction_store,
             connection_cache,
             solana_rpc,
-            txn_sender_runtime: Arc::new(txn_sender_runtime),
+            txn_sender_runtime,
             txn_send_retry_interval_ms,
             max_retry_queue_size,
             validator_info: validator_info.clone(),
@@ -227,19 +140,17 @@ impl TxnSenderImpl {
         };
 
         // Update validator info immediately
-        sender.update_validator_info(&validator_pubkeys);
+        sender.update_validator_info(&[]);
 
         // Start a background task to update validator info periodically
-        let validator_pubkeys = validator_pubkeys.clone();
+        let validator_info_clone = validator_info.clone();
+        let rpc_client_clone = rpc_client.clone();
         tokio::spawn(async move {
-            let mut interval = time::interval(Duration::from_secs(60)); // 10 minutes
+            let mut interval = time::interval(Duration::from_secs(60)); // Update every 60 seconds
 
             loop {
-                // Wait for the next interval tick
                 interval.tick().await;
-
-                // Update validator info
-                Self::update_validator_info_task(validator_info.clone(), rpc_client.clone(), &validator_pubkeys).await;
+                Self::update_validator_info_task(validator_info_clone.clone(), rpc_client_clone.clone(), &[]).await;
             }
         });
 
@@ -247,6 +158,10 @@ impl TxnSenderImpl {
         sender
     }
 
+    // ... other methods ...
+}
+
+impl TxnSenderImpl {
     fn retry_transactions(&self) {
         let transaction_store = self.transaction_store.clone();
         let connection_cache = self.connection_cache.clone();
