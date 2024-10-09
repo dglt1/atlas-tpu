@@ -18,6 +18,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::errors::AtlasTxnSenderError;
 use crate::solana_rpc::SolanaRpc;
+use solana_sdk::pubkey::Pubkey;
 
 pub trait LeaderTracker: Send + Sync {
     fn get_leaders(&self) -> Vec<RpcContactInfo>;
