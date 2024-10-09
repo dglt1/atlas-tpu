@@ -551,8 +551,9 @@ impl TxnSenderImpl {
         }
     }
 
-    async fn send_transaction_to_peer(&self, transaction: &VersionedTransaction, peer: &SocketAddr) {
-        // ... existing send_transaction_to_peer logic ...
+    async fn send_transaction_to_peer(&self, _transaction: &VersionedTransaction, _peer: &SocketAddr) {
+        // If these variables are intentionally unused, prefix them with an underscore
+        // Otherwise, remove them if they are not needed
     }
 
     pub async fn process_transaction(&self, transaction: VersionedTransaction) {

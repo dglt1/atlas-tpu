@@ -5,6 +5,7 @@ use cadence_macros::statsd_time;
 use dashmap::DashMap;
 use solana_sdk::transaction::VersionedTransaction;
 use tracing::error;
+use bincode; // Add this import
 
 #[derive(Clone, Debug)]
 pub struct TransactionData {
@@ -19,8 +20,8 @@ pub struct TransactionData {
 
 impl TransactionData {
     pub fn from_versioned_transaction(transaction: VersionedTransaction) -> Self {
-        // Assuming you have a way to get the wire transaction bytes
-        let wire_transaction = transaction.serialize(); // You might need to implement this method
+        // Serialize the transaction using bincode
+        let wire_transaction = bincode::serialize(&transaction).expect("Failed to serialize transaction");
 
         TransactionData {
             wire_transaction,
