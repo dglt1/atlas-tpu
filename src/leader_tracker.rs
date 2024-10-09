@@ -173,3 +173,22 @@ impl LeaderTracker for LeaderTrackerImpl {
         leader_list
     }
 }
+
+fn get_leader_tpu_address(&self, leader_pubkey: &str) -> Option<String> {
+    // Add logging to check if the leader is found in the map
+    if let Some(leader_info) = self.cur_leaders.get(leader_pubkey) {
+        // Log the leader information
+        debug!("Leader info found: {:?}", leader_info);
+
+        // Check if TPU address is available
+        if let Some(tpu_address) = leader_info.tpu {
+            debug!("TPU address found: {}", tpu_address);
+            return Some(tpu_address);
+        } else {
+            warn!("No TPU address found for leader: {}", leader_pubkey);
+        }
+    } else {
+        warn!("Leader not found in the map: {}", leader_pubkey);
+    }
+    None
+}
