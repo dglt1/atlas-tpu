@@ -21,6 +21,7 @@ use grpc_geyser::GrpcGeyserImpl;
 use jsonrpsee::server::{middleware::ProxyGetRequestLayer, ServerBuilder};
 use serde::Deserialize;
 use solana_client::connection_cache::ConnectionCache;
+use solana_client::rpc_client::RpcClient; // Add this line
 use solana_sdk::signature::{read_keypair_file, Keypair};
 use tracing::{error, info};
 use transaction_store::TransactionStoreImpl;
