@@ -137,6 +137,72 @@ impl LeaderTrackerImpl {
             self.cur_leaders.remove(&slot);
         }
     }
+
+    fn update_leader_tpu_addresses(&self) {
+        let leaders = self.get_leaders();
+        let validator_pubkeys: Vec<Pubkey> = leaders.iter().map(|l| Pubkey::from_str(&l.pubkey).unwrap()).collect();
+
+        // Update validator info with TPU addresses
+        self.update_validator_info(&validator_pubkeys);
+    }
+
+    fn get_leaders(&self) -> Vec<RpcContactInfo> {
+        let start_slot = self.cur_slot.load(Ordering::Relaxed);
+        let end_slot = start_slot + (self.num_leaders * NUM_LEADERS_PER_SLOT) as u64;
+        let mut leaders = IndexMap::new();
+        for slot in start_slot..end_slot {
+            let leader = self.cur_leaders.get(&slot);
+            if let Some(leader) = leader {
+                _ = leaders.insert(leader.pubkey.to_owned(), leader.value().to_owned());
+            }
+            if leaders.len() >= self.num_leaders {
+                break;
+            }
+        }
+        
+        let leader_list = leaders.values().cloned().collect::<Vec<_>>();
+        info!(
+            "Current leaders: {:?}, start_slot: {:?}",
+            leader_list.iter().map(|l| l.pubkey.clone()).collect::<Vec<_>>(),
+            start_slot
+        );
+        self.update_leader_tpu_addresses();
+        leader_list
+    }
+
+    fn update_validator_info(&self, validator_pubkeys: &[Pubkey]) {
+        // Fetch cluster nodes and update TPU addresses
+        let cluster_nodes = match self.rpc_client.get_cluster_nodes() {
+            Ok(nodes) => nodes,
+            Err(e) => {
+                error!("Failed to get cluster nodes: {}", e);
+                return;
+            }
+        };
+
+        let mut updated_info = Vec::new();
+
+        for node in cluster_nodes {
+            if let Ok(pubkey) = Pubkey::from_str(&node.pubkey) {
+                if validator_pubkeys.contains(&pubkey) {
+                    if let Some(tpu_quic_address) = node.tpu_quic {
+                        updated_info.push(ValidatorInfo {
+                            pubkey,
+                            tpu_address: tpu_quic_address,
+                            last_updated: Instant::now(),
+                        });
+                        info!("Updated info for validator {}: TPU QUIC address {}", pubkey, tpu_quic_address);
+                    } else {
+                        warn!("No TPU QUIC address found for validator {}", pubkey);
+                    }
+                }
+            }
+        }
+
+        let mut validator_info = self.validator_info.lock().unwrap();
+        *validator_info = updated_info;
+        info!("Validator info update complete. Updated {} validators.", updated_info.len());
+    }
 }
 
 fn _get_start_slot(next_slot: u64, leader_offset: i64) -> u64 {
@@ -172,23 +238,4 @@ impl LeaderTracker for LeaderTrackerImpl {
         );
         leader_list
     }
-}
-
-fn get_leader_tpu_address(&self, leader_pubkey: &str) -> Option<String> {
-    // Add logging to check if the leader is found in the map
-    if let Some(leader_info) = self.cur_leaders.get(leader_pubkey) {
-        // Log the leader information
-        debug!("Leader info found: {:?}", leader_info);
-
-        // Check if TPU address is available
-        if let Some(tpu_address) = leader_info.tpu {
-            debug!("TPU address found: {}", tpu_address);
-            return Some(tpu_address);
-        } else {
-            warn!("No TPU address found for leader: {}", leader_pubkey);
-        }
-    } else {
-        warn!("Leader not found in the map: {}", leader_pubkey);
-    }
-    None
 }
