@@ -34,7 +34,7 @@ use solana_sdk::compute_budget::ComputeBudgetInstruction;
 use std::env;
 
 use crate::leader_tracker::{LeaderTracker, LeaderTrackerImpl};
-use solana_rpc_client_api::response::RpcContactInfo;
+use std::cmp::min;
 
 const RETRY_COUNT_BINS: [i32; 6] = [0, 1, 2, 5, 10, 25];
 const MAX_RETRIES_BINS: [i32; 5] = [0, 1, 5, 10, 30];
@@ -571,11 +571,15 @@ impl TxnSenderImpl {
     }
 
     // Add this new method to forward transactions to leaders
-    fn forward_to_leaders(&self, transaction_data: &TransactionData) {
+    pub async fn forward_to_leaders(&self, transaction: &VersionedTransaction) {
         let leaders = self.leader_tracker.get_leaders();
-        for leader in leaders {
-            if let Some(tpu_address) = leader.tpu {
-                self.send_to_tpu_peer(&transaction_data.wire_transaction, tpu_address.to_string());
+        let num_leaders = min(self.num_leaders, leaders.len());
+        
+        for leader in leaders.iter().take(num_leaders) {
+            if let Some(tpu_address) = self.validator_info.lock().unwrap().iter().find(|v| v.pubkey == leader.pubkey) {
+                self.send_transaction_to_peer(transaction, &tpu_address.tpu_address).await;
+            } else {
+                warn!("No TPU address found for leader: {}", leader.pubkey);
             }
         }
     }
@@ -628,19 +632,6 @@ impl TxnSenderImpl {
                     info!("Current leaders: {:?}", leaders.iter().map(|l| &l.pubkey).collect::<Vec<_>>());
                 }
                 // ... other async operations ...
-            }
-        }
-    }
-
-    pub async fn forward_to_leaders(&self, transaction: &VersionedTransaction) {
-        let leaders = self.leader_tracker.get_leaders();
-        let num_leaders = min(self.num_leaders, leaders.len());
-        
-        for leader in leaders.iter().take(num_leaders) {
-            if let Some(tpu_address) = self.validator_info.get(&leader.pubkey) {
-                self.send_transaction_to_peer(transaction, tpu_address.value()).await;
-            } else {
-                warn!("No TPU address found for leader: {}", leader.pubkey);
             }
         }
     }
