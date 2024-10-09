@@ -14,7 +14,7 @@ use solana_client::rpc_client::RpcClient;
 use solana_rpc_client_api::response::RpcContactInfo;
 use solana_sdk::slot_history::Slot;
 use tokio::time::sleep;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::errors::AtlasTxnSenderError;
 use crate::solana_rpc::SolanaRpc;
@@ -93,30 +93,34 @@ impl LeaderTrackerImpl {
     fn poll_slot_leaders_once(&self) -> Result<(), AtlasTxnSenderError> {
         let next_slot = self.cur_slot.load(Ordering::Relaxed);
         debug!("Polling slot leaders for slot {}", next_slot);
+
         // polling 1000 slots ahead is more than enough
-        let slot_leaders = self.rpc_client.get_slot_leaders(next_slot, 1000);
-        if let Err(e) = slot_leaders {
-            return Err(format!("Error getting slot leaders: {}", e).into());
-        }
-        let slot_leaders = slot_leaders.unwrap();
-        let new_cluster_nodes = self.rpc_client.get_cluster_nodes();
-        if let Err(e) = new_cluster_nodes {
-            return Err(format!("Error getting cluster nodes: {}", e).into());
-        }
-        let new_cluster_nodes = new_cluster_nodes.unwrap();
+        let slot_leaders = match self.rpc_client.get_slot_leaders(next_slot, 1000) {
+            Ok(leaders) => leaders,
+            Err(e) => return Err(format!("Error getting slot leaders: {}", e).into()),
+        };
+
+        let new_cluster_nodes = match self.rpc_client.get_cluster_nodes() {
+            Ok(nodes) => nodes,
+            Err(e) => return Err(format!("Error getting cluster nodes: {}", e).into()),
+        };
+
         let mut cluster_node_map = HashMap::new();
         for node in new_cluster_nodes {
             cluster_node_map.insert(node.pubkey.clone(), node);
         }
+
         for (i, leader) in slot_leaders.iter().enumerate() {
             let contact_info = cluster_node_map.get(&leader.to_string());
             if let Some(contact_info) = contact_info {
                 self.cur_leaders
                     .insert(next_slot + i as u64, contact_info.clone());
+                info!("Added leader: {} for slot: {}", leader, next_slot + i as u64);
             } else {
-                error!("Leader {} not found in cluster nodes", leader);
+                warn!("Leader {} not found in cluster nodes", leader);
             }
         }
+
         self.clean_up_slot_leaders();
         Ok(())
     }
@@ -159,16 +163,13 @@ impl LeaderTracker for LeaderTrackerImpl {
                 break;
             }
         }
+        
+        let leader_list = leaders.values().cloned().collect::<Vec<_>>();
         info!(
-            "leaders: {:?}, start_slot: {:?}",
-            leaders.clone().keys(),
+            "Current leaders: {:?}, start_slot: {:?}",
+            leader_list.iter().map(|l| l.pubkey.clone()).collect::<Vec<_>>(),
             start_slot
         );
-        leaders
-            .values()
-            .clone()
-            .into_iter()
-            .map(|v| v.to_owned())
-            .collect()
+        leader_list
     }
 }
