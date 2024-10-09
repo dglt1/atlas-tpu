@@ -94,6 +94,53 @@ pub struct TxnSenderImpl {
     signature_send_count: Arc<Mutex<HashMap<String, (usize, Instant)>>>,
     max_signature_send_count: usize,
     leader_tracker: Arc<LeaderTrackerImpl>,
+    num_leaders: usize,
+    txn_sender_threads: usize,  // Add this line
+}
+
+impl TxnSenderImpl {
+    pub fn new(
+        transaction_store: Arc<dyn TransactionStore>,
+        connection_cache: Arc<ConnectionCache>,
+        solana_rpc: Arc<dyn SolanaRpc>,
+        txn_sender_threads: usize,
+        txn_send_retry_interval_ms: u64,
+        max_retry_queue_size: Option<usize>,
+        rpc_client: Arc<RpcClient>,
+        num_leaders: usize,
+        leader_offset: i64,
+    ) -> Self {
+        // Initialize the leader tracker and validator info here
+        let leader_tracker = Arc::new(LeaderTrackerImpl::new(
+            rpc_client.clone(),
+            solana_rpc.clone(),
+            num_leaders,
+            leader_offset,
+        ));
+        let validator_info = Arc::new(Mutex::new(Vec::new()));
+
+        let txn_sender_runtime = Arc::new(Runtime::new().unwrap());
+        let signature_send_count = Arc::new(Mutex::new(HashMap::new()));
+        let max_signature_send_count = get_max_signature_send_count();
+
+        Self {
+            transaction_store,
+            connection_cache,
+            solana_rpc,
+            txn_sender_runtime,
+            txn_send_retry_interval_ms,
+            max_retry_queue_size,
+            validator_info,
+            rpc_client,
+            signature_send_count,
+            max_signature_send_count,
+            leader_tracker,
+            num_leaders,
+            txn_sender_threads,
+        }
+    }
+
+    // ... rest of the implementation ...
 }
 
 impl TxnSenderImpl {
@@ -175,6 +222,8 @@ impl TxnSenderImpl {
             signature_send_count,
             max_signature_send_count,
             leader_tracker,
+            num_leaders,
+            txn_sender_threads,
         };
 
         // Update validator info immediately
@@ -580,6 +629,33 @@ impl TxnSenderImpl {
                 }
                 // ... other async operations ...
             }
+        }
+    }
+
+    pub async fn forward_to_leaders(&self, transaction: &VersionedTransaction) {
+        let leaders = self.leader_tracker.get_leaders();
+        let num_leaders = min(self.num_leaders, leaders.len());
+        
+        for leader in leaders.iter().take(num_leaders) {
+            if let Some(tpu_address) = self.validator_info.get(&leader.pubkey) {
+                self.send_transaction_to_peer(transaction, tpu_address.value()).await;
+            } else {
+                warn!("No TPU address found for leader: {}", leader.pubkey);
+            }
+        }
+    }
+
+    async fn send_transaction_to_peer(&self, transaction: &VersionedTransaction, peer: &SocketAddr) {
+        // ... existing send_transaction_to_peer logic ...
+    }
+
+    pub async fn process_transaction(&self, transaction: VersionedTransaction) {
+        let priority_details = compute_priority_details(&transaction);
+        
+        if priority_details.priority >= self.config.min_priority {
+            self.send_transaction_to_peer(&transaction, &self.rpc_addr).await;
+        } else {
+            self.forward_to_leaders(&transaction).await;
         }
     }
 }
