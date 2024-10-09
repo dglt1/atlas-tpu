@@ -12,9 +12,9 @@ use dashmap::DashMap;
 use indexmap::IndexMap;
 use solana_client::rpc_client::RpcClient;
 use solana_rpc_client_api::response::RpcContactInfo;
-use solana_sdk::slot_history::Slot;
+use solana_sdk::{pubkey::Pubkey, slot_history::Slot};
 use tokio::time::sleep;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::errors::AtlasTxnSenderError;
 use crate::solana_rpc::SolanaRpc;
@@ -93,30 +93,33 @@ impl LeaderTrackerImpl {
     fn poll_slot_leaders_once(&self) -> Result<(), AtlasTxnSenderError> {
         let next_slot = self.cur_slot.load(Ordering::Relaxed);
         debug!("Polling slot leaders for slot {}", next_slot);
-        // polling 1000 slots ahead is more than enough
-        let slot_leaders = self.rpc_client.get_slot_leaders(next_slot, 1000);
-        if let Err(e) = slot_leaders {
-            return Err(format!("Error getting slot leaders: {}", e).into());
-        }
-        let slot_leaders = slot_leaders.unwrap();
-        let new_cluster_nodes = self.rpc_client.get_cluster_nodes();
-        if let Err(e) = new_cluster_nodes {
-            return Err(format!("Error getting cluster nodes: {}", e).into());
-        }
-        let new_cluster_nodes = new_cluster_nodes.unwrap();
-        let mut cluster_node_map = HashMap::new();
+
+        // Get the current epoch info
+        let epoch_info = self.rpc_client.get_epoch_info()?;
+        let current_epoch = epoch_info.epoch;
+
+        // Get slot leaders for the current epoch
+        let slot_leaders = self.rpc_client.get_slot_leaders(next_slot, 1000)?;
+        let new_cluster_nodes = self.rpc_client.get_cluster_nodes()?;
+
+        let mut cluster_node_map: HashMap<Pubkey, RpcContactInfo> = HashMap::new();
         for node in new_cluster_nodes {
-            cluster_node_map.insert(node.pubkey.clone(), node);
+            if let Ok(pubkey) = Pubkey::from_str(&node.pubkey) {
+                cluster_node_map.insert(pubkey, node);
+            } else {
+                warn!("Invalid pubkey: {}", node.pubkey);
+            }
         }
+
         for (i, leader) in slot_leaders.iter().enumerate() {
-            let contact_info = cluster_node_map.get(&leader.to_string());
-            if let Some(contact_info) = contact_info {
+            if let Some(contact_info) = cluster_node_map.get(leader) {
                 self.cur_leaders
                     .insert(next_slot + i as u64, contact_info.clone());
             } else {
-                error!("Leader {} not found in cluster nodes", leader);
+                warn!("Leader {} not found in cluster nodes", leader);
             }
         }
+
         self.clean_up_slot_leaders();
         Ok(())
     }
@@ -151,24 +154,20 @@ impl LeaderTracker for LeaderTrackerImpl {
         let end_slot = start_slot + (self.num_leaders * NUM_LEADERS_PER_SLOT) as u64;
         let mut leaders = IndexMap::new();
         for slot in start_slot..end_slot {
-            let leader = self.cur_leaders.get(&slot);
-            if let Some(leader) = leader {
-                _ = leaders.insert(leader.pubkey.to_owned(), leader.value().to_owned());
-            }
-            if leaders.len() >= self.num_leaders {
-                break;
+            if let Some(leader) = self.cur_leaders.get(&slot) {
+                leaders.insert(leader.pubkey.clone(), leader.value().clone());
+                if leaders.len() >= self.num_leaders {
+                    break;
+                }
             }
         }
+        
+        let leader_list = leaders.values().cloned().collect::<Vec<_>>();
         info!(
             "leaders: {:?}, start_slot: {:?}",
-            leaders.clone().keys(),
+            leader_list.iter().map(|l| l.pubkey.clone()).collect::<Vec<_>>(),
             start_slot
         );
-        leaders
-            .values()
-            .clone()
-            .into_iter()
-            .map(|v| v.to_owned())
-            .collect()
+        leader_list
     }
 }
