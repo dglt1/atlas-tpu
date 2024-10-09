@@ -33,6 +33,9 @@ use solana_sdk::borsh0_10::try_from_slice_unchecked;
 use solana_sdk::compute_budget::ComputeBudgetInstruction;
 use std::env;
 
+use crate::leader_tracker::{LeaderTracker, LeaderTrackerImpl};
+use solana_rpc_client_api::response::RpcContactInfo;
+
 const RETRY_COUNT_BINS: [i32; 6] = [0, 1, 2, 5, 10, 25];
 const MAX_RETRIES_BINS: [i32; 5] = [0, 1, 5, 10, 30];
 const MAX_TIMEOUT_SEND_DATA: Duration = Duration::from_millis(500);
@@ -90,6 +93,7 @@ pub struct TxnSenderImpl {
     rpc_client: Arc<RpcClient>,
     signature_send_count: Arc<Mutex<HashMap<String, (usize, Instant)>>>,
     max_signature_send_count: usize,
+    leader_tracker: Arc<LeaderTrackerImpl>,
 }
 
 impl TxnSenderImpl {
@@ -100,6 +104,9 @@ impl TxnSenderImpl {
         txn_sender_threads: usize,
         txn_send_retry_interval_ms: u64,
         max_retry_queue_size: Option<usize>,
+        rpc_client: Arc<RpcClient>,
+        num_leaders: usize,
+        leader_offset: i64,
     ) -> Self {
         // Initialize tracing subscriber only once
         TRACING_INIT.call_once(|| {
@@ -149,6 +156,13 @@ impl TxnSenderImpl {
 
         let max_signature_send_count = get_max_signature_send_count();
 
+        let leader_tracker = Arc::new(LeaderTrackerImpl::new(
+            rpc_client.clone(),
+            solana_rpc.clone(),
+            num_leaders,
+            leader_offset,
+        ));
+
         let sender = Self {
             transaction_store,
             connection_cache,
@@ -160,6 +174,7 @@ impl TxnSenderImpl {
             rpc_client: rpc_client.clone(),
             signature_send_count,
             max_signature_send_count,
+            leader_tracker,
         };
 
         // Update validator info immediately
@@ -412,10 +427,11 @@ impl TxnSenderImpl {
             self.send_to_tpu_peers(transaction_data.wire_transaction.clone(), signature);
         } else {
             warn!(
-                "Transaction dropped: Signature: {}, Insufficient fee. Required: {} lamports, Actual: {} lamports",
-                signature, min_fee, priority_details.fee
+                "Transaction fee below minimum: Signature: {}, Fee: {} lamports, Minimum: {} lamports. Forwarding to leaders.",
+                signature, priority_details.fee, min_fee
             );
-            statsd_count!("transactions_dropped_insufficient_fee", 1);
+            self.forward_to_leaders(&transaction_data);
+            statsd_count!("transactions_forwarded_to_leaders", 1);
         }
     }
 
@@ -503,6 +519,55 @@ impl TxnSenderImpl {
     fn get_tpu_addresses(&self) -> Vec<String> {
         let validator_info = self.validator_info.lock().unwrap();
         validator_info.iter().map(|info| info.tpu_address.to_string()).collect()
+    }
+
+    // Add this new method to forward transactions to leaders
+    fn forward_to_leaders(&self, transaction_data: &TransactionData) {
+        let leaders = self.leader_tracker.get_leaders();
+        for leader in leaders {
+            if let Some(tpu_address) = leader.tpu {
+                self.send_to_tpu_peer(&transaction_data.wire_transaction, tpu_address.to_string());
+            }
+        }
+    }
+
+    // Modify the send_to_tpu_peer method to be public and take a peer address
+    pub fn send_to_tpu_peer(&self, wire_transaction: &Vec<u8>, peer: String) {
+        let connection_cache = self.connection_cache.clone();
+        let wire_transaction = wire_transaction.clone();
+        self.txn_sender_runtime.spawn(async move {
+            if let Ok(socket_addr) = peer.parse::<std::net::SocketAddr>() {
+                for i in 0..SEND_TXN_RETRIES {
+                    info!("Attempting to send transaction to peer: {}", peer);
+
+                    let conn = connection_cache.get_nonblocking_connection(&socket_addr);
+                    if let Ok(result) = timeout(MAX_TIMEOUT_SEND_DATA, conn.send_data(&wire_transaction)).await {
+                        if let Err(e) = result {
+                            if i == SEND_TXN_RETRIES - 1 {
+                                error!(
+                                    retry = "false",
+                                    "Failed to send transaction to {:?}: {}",
+                                    peer, e
+                                );
+                                statsd_count!("transaction_send_error", 1, "retry" => "false", "last_attempt" => "true");
+                            } else {
+                                statsd_count!("transaction_send_error", 1, "retry" => "false", "last_attempt" => "false");
+                            }
+                        } else {
+                            info!("Successfully sent transaction to peer: {}", peer);
+                            statsd_time!(
+                                "transaction_received_by_peer",
+                                Instant::now().elapsed(), "peer" => &peer, "retry" => "false");
+                            return;
+                        }
+                    } else {
+                        statsd_count!("transaction_send_timeout", 1);
+                    }
+                }
+            } else {
+                error!("Invalid socket address: {}", peer);
+            }
+        });
     }
 }
 
