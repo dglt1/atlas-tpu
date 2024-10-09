@@ -34,6 +34,7 @@ pub struct LeaderTrackerImpl {
     cur_leaders: Arc<DashMap<Slot, RpcContactInfo>>,
     num_leaders: usize,
     leader_offset: i64,
+    validator_info: Arc<Mutex<Vec<ValidatorInfo>>>,
 }
 
 impl LeaderTrackerImpl {
@@ -43,17 +44,15 @@ impl LeaderTrackerImpl {
         num_leaders: usize,
         leader_offset: i64,
     ) -> Self {
-        let leader_tracker = Self {
+        Self {
             rpc_client,
             solana_rpc,
             cur_slot: Arc::new(AtomicU64::new(0)),
             cur_leaders: Arc::new(DashMap::new()),
             num_leaders,
             leader_offset,
-        };
-        leader_tracker.poll_slot();
-        leader_tracker.poll_slot_leaders();
-        leader_tracker
+            validator_info: Arc::new(Mutex::new(Vec::new())),
+        }
     }
 
     /// poll_slot polls for every new slot returned by gRPC geyser
