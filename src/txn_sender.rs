@@ -38,7 +38,6 @@ const MAX_RETRIES_BINS: [i32; 5] = [0, 1, 5, 10, 30];
 const MAX_TIMEOUT_SEND_DATA: Duration = Duration::from_millis(500);
 const MAX_TIMEOUT_SEND_DATA_BATCH: Duration = Duration::from_millis(500);
 const SEND_TXN_RETRIES: usize = 10;
-const MAX_SIGNATURE_SEND_COUNT: usize = 50;
 const SIGNATURE_EXPIRY_DURATION: Duration = Duration::from_secs(3600); // 1 hour
 
 // Add this at the top of your file, outside of any function
@@ -59,6 +58,13 @@ fn get_txn_send_retry_interval() -> Duration {
         .expect("TXN_SEND_RETRY_INTERVAL must be a valid integer");
     
     Duration::from_millis(ms)
+}
+
+fn get_max_signature_send_count() -> usize {
+    env::var("MAX_SIGNATURE_SEND_COUNT")
+        .unwrap_or_else(|_| "50".to_string()) // Default to 50 if not set
+        .parse()
+        .expect("MAX_SIGNATURE_SEND_COUNT must be a valid integer")
 }
 
 struct ValidatorInfo {
@@ -83,6 +89,7 @@ pub struct TxnSenderImpl {
     validator_info: Arc<Mutex<Vec<ValidatorInfo>>>,
     rpc_client: Arc<RpcClient>,
     signature_send_count: Arc<Mutex<HashMap<String, (usize, Instant)>>>,
+    max_signature_send_count: usize,
 }
 
 impl TxnSenderImpl {
@@ -140,6 +147,8 @@ impl TxnSenderImpl {
             }
         });
 
+        let max_signature_send_count = get_max_signature_send_count();
+
         let sender = Self {
             transaction_store,
             connection_cache,
@@ -150,6 +159,7 @@ impl TxnSenderImpl {
             validator_info: validator_info.clone(),
             rpc_client: rpc_client.clone(),
             signature_send_count,
+            max_signature_send_count,
         };
 
         // Update validator info immediately
@@ -340,7 +350,7 @@ impl TxnSenderImpl {
         let mut signature_send_count = self.signature_send_count.lock().unwrap();
         let entry = signature_send_count.entry(signature.clone()).or_insert((0, Instant::now()));
         
-        if entry.0 >= MAX_SIGNATURE_SEND_COUNT {
+        if entry.0 >= self.max_signature_send_count {
             warn!("Transaction with signature {} dropped due to exceeding send limit", signature);
             return;
         }
