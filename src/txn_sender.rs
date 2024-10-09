@@ -486,13 +486,13 @@ impl TxnSenderImpl {
     }
 
     // Add this new method to forward transactions to leaders
-    pub async fn forward_to_leaders(&self, transaction: &VersionedTransaction) {
+    pub fn forward_to_leaders(&self, transaction_data: &TransactionData) {
         let leaders = self.leader_tracker.get_leaders();
         let num_leaders = min(self.num_leaders, leaders.len());
         
         for leader in leaders.iter().take(num_leaders) {
-            if let Some(tpu_address) = self.validator_info.lock().unwrap().iter().find(|v| v.pubkey == leader.pubkey) {
-                self.send_transaction_to_peer(transaction, &tpu_address.tpu_address).await;
+            if let Some(tpu_address) = self.validator_info.lock().unwrap().iter().find(|v| v.pubkey == Pubkey::from_str(&leader.pubkey).unwrap()) {
+                self.send_to_tpu_peer(&transaction_data.wire_transaction, tpu_address.tpu_address.to_string());
             } else {
                 warn!("No TPU address found for leader: {}", leader.pubkey);
             }
